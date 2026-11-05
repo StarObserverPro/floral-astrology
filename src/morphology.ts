@@ -13,7 +13,7 @@ export const MORPHOLOGY_LIMITS = {
   calyxCount: [3, 12], calyxLength: [.28, .92], calyxWidth: [.10, .36], calyxThickness: [.045, .14],
   stemCount: [1, 4], stemLength: [.35, 1.65], stemRadius: [.025, .083],
   stemBend: [.03, .34], stemSpread: [.02, .25], stemTwist: [.3, 2.8],
-  ringCount: [2, 6], ringRadius: [.55, 1.12], ringThickness: [.032, .068],
+  ringCount: [0, 2], ringPattern: [0, 3], ringRadius: [.55, 1.12], ringThickness: [.032, .068],
   ringDepth: [.65, 1.8], ringAspect: [.76, 1.35], ringTilt: [.15, .9], ringSpeed: [.07, .22],
   pendantCount: [0, 4], pendantSize: [.09, .25], pendantAspect: [.8, 2.8],
   stamenCount: [2, 36], stamenLength: [.28, .82], stamenSpread: [.18, .68],
@@ -74,10 +74,11 @@ export function morphologyFromProfile(profile: FlowerProfile, seed = 20261105): 
     const variation = key === 'layers' || key === 'petals' ? 0 : (random()-.5)*.13+(s-.5)*.09;
     result[key] = Math.max(min,Math.min(max,value*(1+variation)));
   }
+  result.ringCount=2*Math.pow(result.ringCount/2,1.45);
   result.twist = .025+f*.19;
   result.asymmetry = weights[3]*.36+weights[1]*f*.12;
   result.stamenCount = Math.max(2, weights[0]*24+weights[1]*32+weights[2]*10+weights[3]*3+(random()-.5)*2);
-  for(const key of ['layers','petals','budPetals','calyxCount','stemCount','ringCount','pendantCount','stamenCount','shardCount'] as const) result[key]=Math.round(result[key]);
+  for(const key of ['layers','petals','budPetals','calyxCount','stemCount','ringCount','ringPattern','pendantCount','stamenCount','shardCount'] as const) result[key]=Math.round(result[key]);
   return result;
 }
 

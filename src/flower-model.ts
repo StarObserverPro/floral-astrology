@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { petalMaturity } from './bloom.ts';
+import { ringPose } from './lighting.ts';
 import { approach, clamp01, lerp } from './math.ts';
 import { MAX_LAYERS, MAX_PETALS_PER_LAYER, MORPHOLOGY_KEYS, dominantFamily, layerPetalCount, layerReveal, morphologyFromProfile, ringCenter, totalPetalCount } from './morphology.ts';
 import type { Morphology } from './morphology.ts';
@@ -127,10 +129,12 @@ export class FlowerModel {
   private filaments: THREE.InstancedMesh;
   private anthers: THREE.InstancedMesh;
   private shards: THREE.InstancedMesh;
-  private collars: THREE.InstancedMesh;
   private core: THREE.Mesh<THREE.BufferGeometry,THREE.MeshPhysicalMaterial>;
   private jewel: THREE.MeshPhysicalMaterial;
   private transform=new THREE.Object3D();
+  private ringQuaternion=new THREE.Quaternion();
+  private ringEuler=new THREE.Euler();
+  private materials:THREE.MeshPhysicalMaterial[]=[];
   private genes=morphologyFromProfile({outward:.5,dream:.5,softness:.5,freedom:.5});
   private target={...this.genes};
   private profile:FlowerProfile={outward:.5,dream:.5,softness:.5,freedom:.5};
@@ -166,7 +170,7 @@ export class FlowerModel {
     this.stems=instances(new THREE.CylinderGeometry(1,1,1,12,32,true),stemMaterial,4);
     this.root.add(this.stems,this.ringNest);
     const torus=new THREE.TorusGeometry(1,1,16,160);
-    for(let i=0;i<6;i++) {
+    for(let i=0;i<2;i++) {
       const material=gold.clone(),uRadius={value:.7},uTube={value:.04},uDepth={value:1};
       material.onBeforeCompile=shader=>{
         Object.assign(shader.uniforms,{uRadius,uTube,uDepth});
@@ -185,10 +189,12 @@ export class FlowerModel {
     this.core.frustumCulled=false;
     this.pendants=instances(octahedron,this.jewel,4);
     this.shards=instances(octahedron,this.jewel,24);
-    this.collars=instances(new THREE.TorusGeometry(.75,.12,10,32),gold,24);
     this.anthers=instances(octahedron,gold,36);
     this.filaments=instances(new THREE.CylinderGeometry(1,1,1,8),gold,36);
-    this.root.add(this.pendants,this.shards,this.collars,this.core,this.anthers,this.filaments);
+    this.root.add(this.pendants,this.shards,this.core,this.anthers,this.filaments);
+    const materials=new Set<THREE.MeshPhysicalMaterial>();
+    this.root.traverse(o=>{if(o instanceof THREE.Mesh){const list=Array.isArray(o.material)?o.material:[o.material];list.forEach(m=>{if(m instanceof THREE.MeshPhysicalMaterial){m.alphaHash=true;materials.add(m);}});}});
+    this.materials=[...materials];
   }
 
   setProfile(profile:FlowerProfile,seed:number):void {
@@ -221,25 +227,25 @@ export class FlowerModel {
   }
 
   update(dt:number,time:number,growth:number,reveals:readonly number[],a:THREE.Color,b:THREE.Color,reduced=false):void {
-    const m=this.genes,d=this.transform;
+    const m=this.genes,d=this.transform,maturity=petalMaturity(growth);
     for(const key of MORPHOLOGY_KEYS) m[key]=approach(m[key],this.target[key],dt,reduced ? .15 : 1.65);
     for(let i=0;i<this.layers.length;i++) {
       const layer=this.layers[i];this.setShape(layer,m,a,b);
       this.populations[i]=approach(this.populations[i],this.targetPopulations[i],dt,reduced ? .15 : 1.65);
       const reveal=layerReveal(i,m.layers,reveals),lengthScale=Math.max(.23,1-m.layerShrink*i);
-      this.fan(layer,this.populations[i],reveal*lengthScale,
+      this.fan(layer,this.populations[i],reveal*lengthScale*maturity,
         lerp(-1.5,m.opening-i*.047,reveal),m.baseRadius,.22+i*m.layerRise*.35,i*2.399963,m.asymmetry,time);
     }
     this.setShape(this.bud,m,a,b);
     const bu=this.bud.uniforms;
     bu.uLength.value=m.budLength;bu.uWidth.value=m.budWidth;bu.uCup.value=.30/m.budLength;
     bu.uRoundness.value=.65;bu.uTaper.value=1;bu.uRuffle.value=m.ruffle*.12;bu.uNotch.value=0;bu.uTwist.value=0;
-    this.fan(this.bud,m.budPetals,lerp(.92,.56,reveals[0])*(.98+.035*growth),lerp(-Math.PI/2,.12,reveals[0]),.30,.18,0,0,time);
+    this.fan(this.bud,m.budPetals,lerp(.92,.56*maturity,reveals[0])*(.98+.035*growth),lerp(-Math.PI/2,.12,reveals[0]),.30,.18,0,0,time);
     this.setShape(this.calyx,m,a,b);
     const cu=this.calyx.uniforms;
     cu.uLength.value=m.calyxLength;cu.uWidth.value=m.calyxWidth;cu.uThickness.value=m.calyxThickness;
     cu.uCup.value=.08+m.cup*.45;cu.uRuffle.value=m.ruffle*.3;cu.uRoundness.value=.55+m.roundness*.4;
-    this.fan(this.calyx,m.calyxCount,.55+.45*reveals[1],-.12,.10,.13,.45,m.asymmetry*.3,time);
+    this.fan(this.calyx,m.calyxCount,(.55+.45*reveals[1])*(.55+.45*growth),-.12,.10,.13,.45,m.asymmetry*.3,time);
 
     const stemLength=m.stemLength*(.62+.38*growth);
     this.stemUniforms.uStemLength.value=stemLength;this.stemUniforms.uStemRadius.value=m.stemRadius;
@@ -250,18 +256,18 @@ export class FlowerModel {
       d.scale.setScalar(Math.max(.00001,clamp01(m.stemCount-i)));d.updateMatrix();this.stems.setMatrixAt(i,d.matrix);
     }
     this.stems.instanceMatrix.needsUpdate=true;
-    // All six potential bands have exactly the same origin. Only their radii,
+    // Both potential bands have exactly the same origin. Only their radii,
     // section dimensions and orientations differ, never their centres.
     this.ringNest.position.fromArray(ringCenter(m,growth));
     const ringCount=Math.round(m.ringCount),outerRadius=Math.max(m.ringRadius,.26+(ringCount-1)*m.ringThickness*2.8);
     for(let i=0;i<this.rings.length;i++) {
       const ring=this.rings[i];ring.mesh.visible=i<ringCount;
-      ring.uRadius.value=outerRadius*(.32+.68*i/Math.max(1,ringCount-1))*(.64+.36*reveals[1]);
+      ring.uRadius.value=outerRadius*(.32+.68*i/Math.max(1,ringCount-1))*(.42+.58*growth);
       ring.uTube.value=m.ringThickness;ring.uDepth.value=m.ringDepth;
       ring.mesh.position.set(0,0,0);
-      const phase=i*2.399963,speed=m.ringSpeed*(.65+i*.21);
-      ring.mesh.rotation.set(Math.PI/2+Math.sin(time*speed+phase)*m.ringTilt,
-        Math.cos(time*speed*.81+phase)*m.ringTilt,time*speed*(i%2?1:-1),'XYZ');
+      const pose=ringPose(m.ringPattern,i,time,m.ringSpeed*.45,m.ringTilt);
+      this.ringEuler.set(...pose,'XYZ');this.ringQuaternion.setFromEuler(this.ringEuler);
+      ring.mesh.quaternion.slerp(this.ringQuaternion,1-Math.exp(-dt*3));
       ring.mesh.scale.set(m.ringAspect,1,1);
     }
     this.pendants.count=Math.ceil(m.pendantCount);
@@ -293,7 +299,7 @@ export class FlowerModel {
       const size=m.antherSize*occupied;d.scale.set(size,size*m.antherAspect,size);d.updateMatrix();this.anthers.setMatrixAt(i,d.matrix);
     }
     this.filaments.instanceMatrix.needsUpdate=this.anthers.instanceMatrix.needsUpdate=true;
-    this.shards.count=this.collars.count=Math.ceil(m.shardCount);
+    this.shards.count=Math.ceil(m.shardCount);
     for(let i=0;i<this.shards.count;i++) {
       const reveal=i<m.shardCount*.45?reveals[1]:reveals[3],phase=i*2.399963;
       const angle=i/m.shardCount*Math.PI*2+time*m.shardOrbit*(i%2?1:-1);
@@ -302,9 +308,15 @@ export class FlowerModel {
       d.rotation.set(time*.13+phase,time*.23+phase,Math.sin(time*.2+phase)*.2);
       const size=Math.max(.00001,m.shardSize*reveal*clamp01(m.shardCount-i));
       d.scale.set(size*.7,size*m.shardAspect,size*.7);d.updateMatrix();this.shards.setMatrixAt(i,d.matrix);
-      d.scale.set(size,size*.6,size);d.rotateX(Math.PI/2);d.updateMatrix();this.collars.setMatrixAt(i,d.matrix);
     }
-    this.shards.instanceMatrix.needsUpdate=this.collars.instanceMatrix.needsUpdate=true;
+    this.shards.instanceMatrix.needsUpdate=true;
+  }
+
+  setAppearance(alpha:number,metal:THREE.Color):void {
+    for(const material of this.materials){
+      material.opacity=alpha;
+      if(material.metalness>.5)material.color.copy(metal);
+    }
   }
 
   diagnostics():Record<string,unknown> {

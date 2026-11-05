@@ -1,9 +1,11 @@
 import './style.css';
-import { FlowerScene, PALETTES } from './flower.ts';
+import { FlowerScene } from './flower.ts';
 import { FlowerFallback } from './flower-fallback.ts';
 import { PhotoDialog } from './photo.ts';
 import { QUESTIONS, answerAt, flowerReading, profileFromAnswers, resultType } from './quiz.ts';
 import type { Answer } from './quiz.ts';
+import { PALETTES, COLOR_ALGORITHMS } from './color.ts';
+import { answerArt, colorArt } from './art.ts';
 import { shapeSeedFromAnswers } from './morphology.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
@@ -29,6 +31,9 @@ app.innerHTML = `
   </section>
   <div class="palette" role="group" aria-label="水晶颜色">
     ${PALETTES.map((palette, index) => `<button class="palette-button" data-palette="${index}" aria-label="${palette.name}" aria-pressed="${index === 0}" style="--gem-color:${palette.gem}"><span class="palette-gem" aria-hidden="true"></span></button>`).join('')}
+    <div class="color-modes" role="group" aria-label="配色方式">
+      ${COLOR_ALGORITHMS.map((mode,index)=>`<button class="palette-button color-mode" data-color-mode="${index}" aria-label="${mode.name}" aria-pressed="${index===1}">${colorArt(index)}</button>`).join('')}
+    </div>
   </div>
   <div id="progress" class="progress" role="progressbar" aria-label="答题进度" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0">
     ${QUESTIONS.map((_, index) => `<span data-step="${index}" aria-hidden="true"></span>`).join('')}
@@ -47,6 +52,8 @@ let questionIndex = 0;
 let busy = false;
 let transitionTimer: ReturnType<typeof setTimeout> | undefined;
 let theme: 'night' | 'dawn' = 'night';
+let paletteIndex=0;
+let colorAlgorithm=1;
 
 const question = document.querySelector<HTMLElement>('#question')!;
 const questionCopy = document.querySelector<HTMLElement>('#question-copy')!;
@@ -102,7 +109,7 @@ function renderQuestion(focus = false): void {
       button.type = 'button';
       button.className = 'answer';
       button.dataset.answer = String(index);
-      button.innerHTML = '<span class="answer-gem" aria-hidden="true"><span class="facet"></span></span><span class="answer-label"></span>';
+      button.innerHTML = answerArt(index)+'<span class="answer-label"></span>';
       button.querySelector('.answer-label')!.textContent = option.text;
       button.addEventListener('click', () => choose(index, button));
       return button;
@@ -159,9 +166,16 @@ themeButton.addEventListener('click', () => {
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-palette]')) {
   button.addEventListener('click', () => {
     const index = Number(button.dataset.palette);
-    scene?.setPalette(index);
+    paletteIndex=index;scene?.setPalette(index);
     for (const peer of document.querySelectorAll('[data-palette]')) peer.setAttribute('aria-pressed', String(peer === button));
     document.documentElement.style.setProperty('--chosen-gem', PALETTES[index].gem);
+  });
+}
+
+for(const button of document.querySelectorAll<HTMLButtonElement>('[data-color-mode]')) {
+  button.addEventListener('click',()=>{
+    colorAlgorithm=Number(button.dataset.colorMode);scene?.setColorAlgorithm(colorAlgorithm);
+    for(const peer of document.querySelectorAll('[data-color-mode]'))peer.setAttribute('aria-pressed',String(peer===button));
   });
 }
 
@@ -181,6 +195,12 @@ if (specimen && /^[EI][SN][TF][JP]$/.test(specimen)) {
   answers = QUESTIONS.slice(0, count).map(q => ({ questionId: q.id, trait: q.options.find(o => specimen.includes(o.trait))!.trait }));
   questionIndex = count;
 }
+if(qaParams.has('qa')) {
+  colorAlgorithm=Math.max(0,Math.min(2,Number(qaParams.get('color')??1)||0));
+  paletteIndex=Math.max(0,Math.min(3,Number(qaParams.get('palette')??0)||0));
+  for(const button of document.querySelectorAll<HTMLElement>('[data-color-mode]'))button.setAttribute('aria-pressed',String(Number(button.dataset.colorMode)===colorAlgorithm));
+  for(const button of document.querySelectorAll<HTMLElement>('[data-palette]'))button.setAttribute('aria-pressed',String(Number(button.dataset.palette)===paletteIndex));
+}
 renderQuestion();
 document.documentElement.dataset.theme = theme;
 
@@ -198,6 +218,7 @@ requestAnimationFrame(() => {
     scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
     scene.setTheme(theme, true);
   }
+  scene?.setPalette(paletteIndex);scene?.setColorAlgorithm(colorAlgorithm);
   cameraButton.disabled = false;
   viewButton.disabled = false;
 });

@@ -1,6 +1,6 @@
-import { PALETTES } from './flower.ts';
+import { PALETTES, COLOR_ALGORITHMS, generateColors } from './color.ts';
 import { approach, clamp01, lerp } from './math.ts';
-import { BLOOM_STAGE_NAMES, bloomStage, revealTargets } from './bloom.ts';
+import { BLOOM_STAGE_NAMES, bloomStage, revealTargets, petalMaturity, flowerAppearance } from './bloom.ts';
 import { FlowerRotation } from './rotation.ts';
 import { MORPHOLOGY_KEYS, dominantFamily, layerPetalCount, layerReveal, morphologyFromProfile, petalOutline } from './morphology.ts';
 import type { FlowerProfile } from './quiz.ts';
@@ -26,6 +26,9 @@ export class FlowerFallback {
   private dawn=0;
   private dawnTarget=0;
   private palette=0;
+  private colorAlgorithm=1;
+  private seed=20261105;
+  private appearanceAge=0;
   private time=0;
   private last=0;
   private frame=0;
@@ -50,7 +53,8 @@ export class FlowerFallback {
     else if(!this.disposed){this.last=0;this.frame=requestAnimationFrame(this.tick);}
   };
   setProfile(profile:FlowerProfile,progress:number,reset=false,seed=20261105):void {
-    this.target={...profile};this.targetGenes=morphologyFromProfile(profile,seed);
+    this.target={...profile};this.seed=seed;
+    if(reset){this.appearanceAge=0;this.growth=0;this.reveals=[0,0,0,0];}this.targetGenes=morphologyFromProfile(profile,seed);
     this.growthTarget=reset?progress:Math.max(this.growthTarget,progress);
     this.unlockedStage=reset?bloomStage(progress):Math.max(this.unlockedStage,bloomStage(progress));
     this.revealTargets=revealTargets(this.unlockedStage/4);
@@ -58,6 +62,7 @@ export class FlowerFallback {
   }
   setTheme(theme:'dawn'|'night',immediate=false):void {this.dawnTarget=theme==='dawn'?1:0;if(immediate)this.dawn=this.dawnTarget;}
   setPalette(index:number):void {if(PALETTES[index])this.palette=index;}
+  setColorAlgorithm(index:number):void {if(COLOR_ALGORITHMS[index])this.colorAlgorithm=index;}
   resetView():void {this.rotation.reset();}
   snapshot(width:number,height:number):HTMLCanvasElement {
     const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
@@ -69,25 +74,28 @@ export class FlowerFallback {
   }
   private tick=(now:number):void=>{
     if(this.disposed||document.hidden)return;
-    const dt=this.last?Math.min((now-this.last)/1000,.25):1/60;this.last=now;
+    const dt=this.last?Math.min((now-this.last)/1000,.25):1/60;this.last=now;this.appearanceAge+=dt;
     if(!this.reduced)this.time+=dt;
     for(const key of Object.keys(this.current) as (keyof FlowerProfile)[])this.current[key]=approach(this.current[key],this.target[key],dt,this.reduced ? .15 : 2.2);
     for(const key of MORPHOLOGY_KEYS)this.genes[key]=approach(this.genes[key],this.targetGenes[key],dt,this.reduced ? .15 : 1.65);
     this.growth=approach(this.growth,this.growthTarget,dt,this.reduced ? .15 : 2.2);
     for(let i=0;i<4;i++)this.reveals[i]=approach(this.reveals[i],this.revealTargets[i],dt,this.reduced ? .15 : 1.3);
     this.rotation.update(dt,this.reduced);this.dawn=approach(this.dawn,this.dawnTarget,dt,.65);this.draw();
+    this.canvas.dataset.petalMaturity=petalMaturity(this.growth).toFixed(3);
+    this.canvas.dataset.appearance=flowerAppearance(this.appearanceAge,this.reduced).toFixed(3);
+    this.canvas.dataset.colorAlgorithm=COLOR_ALGORITHMS[this.colorAlgorithm].id;
     this.canvas.dataset.closedBud=String(this.reveals[0]<.005);
     this.canvas.dataset.stageSettled=String(this.reveals.every((v,i)=>Math.abs(v-this.revealTargets[i])<.015));
     document.documentElement.dataset.rendered='true';(window as unknown as Record<string,unknown>).__VISUAL_READY__=true;
     this.frame=requestAnimationFrame(this.tick);
   };
   private draw(c=this.ctx,w=this.width,h=this.height,photo=false):void {
-    const m=this.genes,d=this.dawn,palette=PALETTES[this.palette];
+    const m=this.genes,d=this.dawn,palette=generateColors(this.current,this.seed,this.palette,this.colorAlgorithm);
     const rgb=(a:number[],b:number[])=>`rgb(${a.map((v,i)=>Math.round(lerp(v,b[i],d))).join(',')})`;
-    const background=rgb([18,20,35],[231,223,210]),metal=rgb([192,167,120],[143,112,63]);
+    const background=rgb([18,20,35],[231,223,210]),metal=palette.metal;
     c.fillStyle=background;c.fillRect(0,0,w,h);
     const unit=photo?Math.min(w*.20,h*.135):Math.min(w*.18,h*.11,155);
-    c.save();c.translate(w/2,h*(photo?.53:.53));c.lineJoin='round';c.lineCap='round';
+    c.save();c.globalAlpha=flowerAppearance(this.appearanceAge,this.reduced);c.translate(w/2,h*(photo?.53:.53));c.lineJoin='round';c.lineCap='round';
     c.rotate((this.rotation.state.yaw-.35)*.18+this.rotation.state.roll*.35);
     c.strokeStyle=metal;c.lineWidth=Math.max(1.5,m.stemRadius*unit*.7);
     const bottom=unit*(m.stemLength*.45+.8);
@@ -103,7 +111,7 @@ export class FlowerFallback {
     }
     for(let layer=0;layer<Math.ceil(m.layers);layer++) {
       const reveal=layerReveal(layer,m.layers,this.reveals);if(reveal<.002)continue;
-      const count=layerPetalCount(m,layer),size=Math.max(.23,1-layer*m.layerShrink)*reveal;
+      const count=layerPetalCount(m,layer),size=Math.max(.23,1-layer*m.layerShrink)*reveal*petalMaturity(this.growth);
       for(let i=0;i<Math.ceil(count);i++) {
         const angle=i/count*Math.PI*2+layer*2.399963,asym=1-m.asymmetry*(.5+.5*Math.cos(angle));
         c.save();c.rotate(angle);c.scale(size*clamp01(count-i),size*asym);c.beginPath();

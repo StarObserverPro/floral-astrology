@@ -15,17 +15,17 @@ export function photoFilename(type?: string): string {
 export async function photograph(source: FlowerPhotoSource, type: string | undefined, theme: 'dawn' | 'night'): Promise<File> {
   const canvas = source.snapshot(1600, 2000);
   if (type) {
-    await document.fonts.load('76px "Floral Roman"', type);
+    await document.fonts.load('76px "Floral Gothic"', type);
     const c = canvas.getContext('2d')!;
     c.save();
     c.fillStyle = theme === 'dawn' ? '#514638' : '#eee2ce';
     c.textAlign = 'center';
-    c.font = '76px "Floral Roman", serif';
+    c.font = '76px "Floral Gothic", serif';
     // Letter spacing is laid out explicitly so it is consistent on mobile Safari.
     const widths = [...type].map(letter => c.measureText(letter).width);
-    const total = widths.reduce((a,b) => a+b, 0) + 3*22;
+    const total = widths.reduce((a,b) => a+b, 0) + 3*12;
     let x = (canvas.width-total)/2;
-    [...type].forEach((letter,i) => { c.fillText(letter,x+widths[i]/2,205); x += widths[i]+22; });
+    [...type].forEach((letter,i) => { c.fillText(letter,x+widths[i]/2,205); x += widths[i]+12; });
     c.restore();
   }
   return new File([await pngBlob(canvas)], photoFilename(type), { type: 'image/png' });

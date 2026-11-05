@@ -7,59 +7,17 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { approach, lerp, seededRandom } from './math.ts';
-import { BLOOM_STAGE_NAMES, bloomStage, revealTargets } from './bloom.ts';
+import { BLOOM_STAGE_NAMES, bloomStage, revealTargets, flowerAppearance, petalMaturity } from './bloom.ts';
 import { FlowerRotation } from './rotation.ts';
 import type { FlowerProfile } from './quiz.ts';
 
-export const PALETTES = [
-  { name: '月白紫晶', a: '#c4adf0', b: '#76d8e0', gem: '#ad91dc' },
-  { name: '蔷薇石英', a: '#f1b6c8', b: '#d78bda', gem: '#d695ad' },
-  { name: '碧色水晶', a: '#a1dfc8', b: '#8ebfe1', gem: '#8ecab7' },
-  { name: '蜜色琥珀', a: '#f4d7a3', b: '#e8a685', gem: '#dfba79' },
-] as const;
-
 import { FlowerModel } from './flower-model.ts';
+import { PALETTES, COLOR_ALGORITHMS, generateColors } from './color.ts';
+import { lightOrbits } from './lighting.ts';
+import { AtmosphereField } from './atmosphere.ts';
+import { DiffusionPass } from './diffusion.ts';
 import { dominantFamily } from './morphology.ts';
 import { renderScale, supportedSamples } from './render-quality.ts';
-
-function makeAtmosphere(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: { uDawn: { value: 0 }, uTime: { value: 0 }, uAspect: { value: 1 } },
-    depthWrite: false, depthTest: false,
-    vertexShader: /* glsl */`
-      varying vec2 vUv;
-      void main() { vUv = uv; gl_Position = vec4(position.xy, .9999, 1.0); }
-    `,
-    fragmentShader: /* glsl */`
-      varying vec2 vUv;
-      uniform float uDawn;
-      uniform float uTime;
-      uniform float uAspect;
-      void main() {
-        vec2 p = vUv;
-        vec2 q = (p-vec2(.5,.49))*vec2(uAspect,1.0);
-        float halo = exp(-dot(q,q)*4.0);
-        vec3 night = mix(vec3(.009,.012,.026), vec3(.028,.034,.068), p.y);
-        night += halo * vec3(.050,.030,.069);
-        night += exp(-length((p-vec2(.24,.75))*vec2(1.0,1.7))*6.0)*vec3(.028,.017,.018);
-        vec3 day = mix(vec3(.72,.67,.61), vec3(.92,.86,.73), p.y);
-        day += halo * vec3(.15,.14,.15);
-        vec2 light = p-vec2(.95,1.30);
-        float angle = atan(light.y,light.x);
-        float beams = pow(max(0.0,sin(angle*31.0+sin(angle*13.0)*1.3+uTime*.013)),14.0);
-        beams += pow(max(0.0,sin(angle*58.0-1.8)),22.0)*.35;
-        beams *= smoothstep(.0,.85,p.y) * .18;
-        vec3 color = mix(night,day,uDawn);
-        color += beams * mix(vec3(.045,.033,.065),vec3(.80,.61,.35),uDawn);
-        float vignette = smoothstep(.25,.90,length(q));
-        color *= 1.0-vignette*mix(.42,.12,uDawn);
-        gl_FragColor = vec4(color,1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }
-    `,
-  });
-}
 
 function makeMotes(seed: number): THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial> {
   const random = seededRandom(seed), data: number[] = [], phase: number[] = [];
@@ -114,9 +72,10 @@ export class FlowerScene {
   private composer:EffectComposer;
   private bloom:UnrealBloomPass;
   private smaa:SMAAPass;
+  private diffusion=new DiffusionPass();
   private rotation:FlowerRotation;
   private flower=new FlowerModel();
-  private atmosphere=makeAtmosphere();
+  private atmosphere=new AtmosphereField();
   private motes=makeMotes(271828);
   private key=new THREE.DirectionalLight('#ffe3c7',1);
   private fill=new THREE.DirectionalLight('#b6caff',.6);
@@ -135,8 +94,14 @@ export class FlowerScene {
   private unlockedStage=0;
   private dawn=0;
   private dawnTarget=0;
-  private colorA=new THREE.Color(PALETTES[0].a);
-  private colorB=new THREE.Color(PALETTES[0].b);
+  private palette=0;
+  private colorAlgorithm=1;
+  private seed=20261105;
+  private colorA=new THREE.Color(generateColors(this.profile,this.seed).a);
+  private colorB=new THREE.Color(generateColors(this.profile,this.seed).b);
+  private colorMetal=new THREE.Color(generateColors(this.profile,this.seed).metal);
+  private nextMetal=this.colorMetal.clone();
+  private appearanceAge=0;
   private nextA=this.colorA.clone();
   private nextB=this.colorB.clone();
   private clock=0;
@@ -166,7 +131,7 @@ export class FlowerScene {
     const room=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(this.renderer);
     this.environment=pmrem.fromScene(room,.04);this.scene.environment=this.environment.texture;this.scene.environmentIntensity=.55;
     room.dispose();pmrem.dispose();
-    const background=new THREE.Mesh(new THREE.PlaneGeometry(2,2),this.atmosphere);
+    const background=new THREE.Mesh(new THREE.PlaneGeometry(2,2),new THREE.MeshBasicMaterial({map:this.atmosphere.target.texture,depthTest:false,depthWrite:false,toneMapped:false}));
     background.frustumCulled=false;background.renderOrder=-1000;
     this.scene.add(background,this.motes,this.flower.root,this.ambient);
     this.key.position.set(4,7,5);this.fill.position.set(-5,2,-2);
@@ -184,6 +149,7 @@ export class FlowerScene {
     this.composer=new EffectComposer(this.renderer,target);
     this.composer.addPass(new RenderPass(this.scene,this.camera));
     this.bloom=new UnrealBloomPass(new THREE.Vector2(1,1),.14,.60,1.65);this.composer.addPass(this.bloom);
+    this.composer.addPass(this.diffusion);
     this.smaa=new SMAAPass();this.composer.addPass(this.smaa);this.composer.addPass(new OutputPass());
     this.resizeObserver=new ResizeObserver(this.resize);this.resizeObserver.observe(container);
     document.addEventListener('visibilitychange',this.onVisibility);
@@ -194,7 +160,8 @@ export class FlowerScene {
   }
 
   setProfile(profile:FlowerProfile,progress:number,reset=false,seed=20261105):void {
-    this.target={...profile};this.flower.setProfile(profile,seed);
+    this.target={...profile};this.seed=seed;this.flower.setProfile(profile,seed);this.retargetColors();
+    if(reset){this.appearanceAge=0;this.growth=0;this.reveals=[0,0,0,0];}
     this.growthTarget=reset?progress:Math.max(this.growthTarget,progress);
     this.unlockedStage=reset?bloomStage(progress):Math.max(this.unlockedStage,bloomStage(progress));
     this.revealTargets=revealTargets(this.unlockedStage/4);
@@ -204,10 +171,12 @@ export class FlowerScene {
   setTheme(theme:'dawn'|'night',immediate=false):void {
     this.dawnTarget=theme==='dawn'?1:0;if(immediate)this.dawn=this.dawnTarget;
   }
-  setPalette(index:number):void {
-    const palette=PALETTES[index];if(!palette)return;
-    this.nextA.set(palette.a);this.nextB.set(palette.b);
+  private retargetColors():void {
+    const colors=generateColors(this.target,this.seed,this.palette,this.colorAlgorithm);
+    this.nextA.set(colors.a);this.nextB.set(colors.b);this.nextMetal.set(colors.metal);
   }
+  setPalette(index:number):void {if(!PALETTES[index])return;this.palette=index;this.retargetColors();}
+  setColorAlgorithm(index:number):void {if(!COLOR_ALGORITHMS[index])return;this.colorAlgorithm=index;this.retargetColors();}
   resetView():void {this.rotation.reset();}
 
   snapshot(width:number,height:number):HTMLCanvasElement {
@@ -220,14 +189,14 @@ export class FlowerScene {
       // Retain supported MSAA levels when capturing; never assume 2 is supported.
       this.composer.renderTarget1.samples=this.composer.renderTarget2.samples=this.photoSamples;
       this.renderer.setPixelRatio(1);this.renderer.setSize(width,height,false);
-      this.composer.setPixelRatio(1);this.composer.setSize(width,height);
+      this.composer.setPixelRatio(1);this.composer.setSize(width,height);this.diffusion.setDpr(1);this.atmosphere.setSize(width,height);
       this.camera.aspect=width/height;this.camera.fov=39;
       this.camera.position.set(0,5.2,11.4);this.camera.lookAt(0,.62,0);this.camera.updateProjectionMatrix();
-      this.atmosphere.uniforms.uAspect.value=width/height;this.motes.material.uniforms.uDpr.value=1;
-      this.composer.render();
+      this.motes.material.uniforms.uDpr.value=1;
+      this.renderFrame();
       const context=canvas.getContext('2d');if(!context)throw new Error('The photo canvas is unavailable.');
       context.drawImage(this.canvas,0,0);return canvas;
-    } finally {this.composer.renderTarget1.samples=this.composer.renderTarget2.samples=samples;this.applySize(box.width,box.height);this.composer.render();}
+    } finally {this.composer.renderTarget1.samples=this.composer.renderTarget2.samples=samples;this.applySize(box.width,box.height);this.renderFrame();}
   }
 
   private onVisibility=():void=>{
@@ -252,7 +221,7 @@ export class FlowerScene {
     this.camera.aspect=width/height;this.camera.fov=portrait?44:38;
     this.camera.position.set(0,portrait?5.7:4.8,portrait?12.4:10.5);
     this.camera.lookAt(0,portrait?1.05:1.15,0);this.camera.updateProjectionMatrix();
-    this.atmosphere.uniforms.uAspect.value=width/height;this.motes.material.uniforms.uDpr.value=this.dpr;
+    this.atmosphere.setSize(width*this.dpr,height*this.dpr);this.diffusion.setDpr(this.dpr);this.motes.material.uniforms.uDpr.value=this.dpr;
     this.canvas.dataset.renderScale=this.dpr.toFixed(2);
     this.canvas.dataset.msaa=String(this.composer.renderTarget1.samples);
   }
@@ -260,23 +229,27 @@ export class FlowerScene {
   private tick=(now:number):void=>{
     if(this.disposed||document.hidden)return;
     const rawDt=this.last?(now-this.last)/1000:1/60,dt=Math.min(.25,rawDt);
-    this.last=now;this.clock+=dt;
+    this.last=now;this.clock+=dt;this.appearanceAge+=dt;
     const time=this.reduced?0:this.clock;
     for(const key of Object.keys(this.profile) as (keyof FlowerProfile)[]) this.profile[key]=approach(this.profile[key],this.target[key],dt,this.reduced ? .15 : 2.2);
     this.growth=approach(this.growth,this.growthTarget,dt,this.reduced ? .15 : 2.2);
     for(let i=0;i<4;i++)this.reveals[i]=approach(this.reveals[i],this.revealTargets[i],dt,this.reduced ? .15 : 1.3);
     this.dawn=approach(this.dawn,this.dawnTarget,dt,.65);
-    this.colorA.lerp(this.nextA,1-Math.exp(-dt*2.4));this.colorB.lerp(this.nextB,1-Math.exp(-dt*2.4));
+    this.colorA.lerp(this.nextA,1-Math.exp(-dt*2.4));this.colorB.lerp(this.nextB,1-Math.exp(-dt*2.4));this.colorMetal.lerp(this.nextMetal,1-Math.exp(-dt*2.4));
     this.flower.update(dt,time,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
+    this.flower.setAppearance(flowerAppearance(this.appearanceAge,this.reduced),this.colorMetal);
     this.rotation.update(dt,this.reduced);const view=this.rotation.state;
     this.flower.root.rotation.set(view.pitch,view.yaw,view.roll,'ZXY');this.flower.root.position.y=Math.sin(time*.65)*.018;
-    this.atmosphere.uniforms.uDawn.value=this.dawn;this.atmosphere.uniforms.uTime.value=time;
+    const lights=lightOrbits(time);
+    this.keyArea.position.fromArray(lights.key);this.rimArea.position.fromArray(lights.rim);this.backArea.position.fromArray(lights.back);this.sparkle.position.fromArray(lights.point);
+    for(const area of [this.keyArea,this.rimArea,this.backArea])area.lookAt(0,.6,0);
     this.motes.material.uniforms.uTime.value=time;this.motes.material.uniforms.uDawn.value=this.dawn;
     this.key.intensity=lerp(.45,.9,this.dawn);this.fill.intensity=lerp(.3,.5,this.dawn);this.ambient.intensity=lerp(.3,.6,this.dawn);
     this.heart.intensity=lerp(1.4,.65,this.dawn)*(.4+.6*this.reveals[2]);this.sparkle.intensity=lerp(4.2,3.5,this.dawn);
     this.keyArea.intensity=lerp(2.6,3.9,this.dawn);this.rimArea.intensity=lerp(2.9,2.4,this.dawn);this.backArea.intensity=lerp(1.9,2.2,this.dawn);
     this.bloom.strength=lerp(.14,.09,this.dawn);this.renderer.toneMappingExposure=lerp(.98,.9,this.dawn);
-    this.renderer.info.reset();this.composer.render();
+    this.diffusion.amount=lerp(.85,1.2,this.dawn);
+    this.renderer.info.reset();this.renderFrame();
     // Resolution adapts only after sustained slow windows; morphology, solid
     // band dimensions, MSAA and SMAA remain intact.
     if(this.clock>4){
@@ -290,6 +263,11 @@ export class FlowerScene {
         this.sampleFrames=0;this.sampleTime=0;
       }
     }
+    this.canvas.dataset.appearance=flowerAppearance(this.appearanceAge,this.reduced).toFixed(3);
+    this.canvas.dataset.petalMaturity=petalMaturity(this.growth).toFixed(3);
+    this.canvas.dataset.colorAlgorithm=COLOR_ALGORITHMS[this.colorAlgorithm].id;
+    this.canvas.dataset.generatedColors=[this.colorA.getHexString(),this.colorB.getHexString()].join(',');
+    this.canvas.dataset.lightPosition=this.sparkle.position.toArray().map(v=>v.toFixed(2)).join(',');
     this.canvas.dataset.frameMs=this.frameMs.toFixed(1);
     this.canvas.dataset.closedBud=String(this.reveals[0]<.005);
     const details=this.flower.diagnostics();
@@ -298,6 +276,11 @@ export class FlowerScene {
     if(this.clock>.12){document.documentElement.dataset.rendered='true';(window as unknown as Record<string,unknown>).__VISUAL_READY__=true;}
     this.frame=requestAnimationFrame(this.tick);
   };
+
+  private renderFrame():void {
+    this.atmosphere.render(this.renderer,this.camera,this.keyArea,this.sparkle,this.dawn,this.reduced?0:this.clock);
+    this.composer.render();
+  }
 
   diagnostics():Record<string,unknown> {
     return {webgl:this.renderer.capabilities.isWebGL2,dpr:this.dpr,frameMs:this.frameMs,growth:this.growth,targetGrowth:this.growthTarget,profile:{...this.profile},
@@ -319,7 +302,7 @@ export class FlowerScene {
         if(object instanceof THREE.InstancedMesh)object.dispose();
       }
     });
-    geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());this.environment.dispose();
+    geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());this.environment.dispose();this.atmosphere.dispose();
     this.composer.passes.forEach(pass=>pass.dispose());this.composer.dispose();this.renderer.dispose();this.canvas.remove();
   }
 }
