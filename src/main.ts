@@ -4,6 +4,7 @@ import { FlowerFallback } from './flower-fallback.ts';
 import { PhotoDialog } from './photo.ts';
 import { QUESTIONS, answerAt, flowerReading, profileFromAnswers, resultType } from './quiz.ts';
 import type { Answer } from './quiz.ts';
+import { shapeSeedFromAnswers } from './morphology.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 const sun = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3.7"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
@@ -15,7 +16,6 @@ const orbit = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse 
 
 app.innerHTML = `
   <div id="scene" aria-busy="true"></div>
-  <div class="frame-glow" aria-hidden="true"></div>
   <nav class="quiet-controls" aria-label="画面">
     <button id="back" class="icon-button back-button" aria-label="上一题" hidden>${back}</button>
     <button id="theme" class="icon-button theme-button" aria-label="切换到晨曦" aria-pressed="false">${sun}</button>
@@ -132,7 +132,7 @@ function choose(index: number, button?: HTMLButtonElement): void {
   const keyboard = button?.matches(':focus-visible') ?? false;
   button?.classList.add('chosen');
   answers = answerAt(answers, questionIndex, index);
-  scene?.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length);
+  scene?.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
   transition(() => { questionIndex++; }, keyboard);
 }
 
@@ -142,7 +142,7 @@ backButton.addEventListener('click', () => {
   transition(() => {
     questionIndex--;
     answers = answers.slice(0, questionIndex);
-    scene?.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length);
+    scene?.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
   }, keyboard);
 });
 
@@ -170,10 +170,17 @@ restartButton.addEventListener('click', () => {
   const keyboard = restartButton.matches(':focus-visible');
   transition(() => {
     answers = []; questionIndex = 0;
-    scene?.setProfile(profileFromAnswers(answers), 0, true);
+    scene?.setProfile(profileFromAnswers(answers), 0, true, shapeSeedFromAnswers(answers));
   }, keyboard);
 });
 
+const qaParams = new URLSearchParams(location.search);
+const specimen = qaParams.has('qa') ? qaParams.get('specimen') : null;
+if (specimen && /^[EI][SN][TF][JP]$/.test(specimen)) {
+  const count = Math.max(0, Math.min(12, Number(qaParams.get('answered') ?? 12) || 0));
+  answers = QUESTIONS.slice(0, count).map(q => ({ questionId: q.id, trait: q.options.find(o => specimen.includes(o.trait))!.trait }));
+  questionIndex = count;
+}
 renderQuestion();
 document.documentElement.dataset.theme = theme;
 
@@ -182,13 +189,13 @@ document.documentElement.dataset.theme = theme;
 requestAnimationFrame(() => {
   try {
     scene = new FlowerScene(sceneElement);
-    scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length);
+    scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
     sceneElement.setAttribute('aria-busy', 'false');
   } catch (error) {
     console.warn('WebGL is unavailable; using the canvas flower.', error);
     sceneElement.setAttribute('aria-busy', 'false');
     scene = new FlowerFallback(sceneElement);
-    scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length);
+    scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
     scene.setTheme(theme, true);
   }
   cameraButton.disabled = false;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bloomStage, petalScale, revealTargets } from '../src/bloom.ts';
+import { bloomStage, revealTargets } from '../src/bloom.ts';
+import { layerReveal } from '../src/morphology.ts';
 import { DEFAULT_VIEW, MAX_PITCH, MIN_PITCH, RotationState } from '../src/rotation.ts';
 import { photoFilename } from '../src/photo.ts';
 
@@ -10,9 +11,10 @@ test('new structural layers unlock at answers 3, 6, 9 and 12', () => {
     const targets = revealTargets(answered/12);
     assert.equal(targets.reduce((a,b) => a+b,0), Math.floor(answered/3));
   }
-  assert.ok(petalScale(0,.2,0) > .4);
-  assert.ok(petalScale(1,.2,0) < .01);
-  assert.ok(petalScale(1,.5,1) > .99);
+  for (let layer=0;layer<8;layer++) assert.equal(layerReveal(layer,7,revealTargets(2/12)),0);
+  assert.equal(layerReveal(0,1,revealTargets(3/12)),1);
+  assert.equal(layerReveal(6,7,revealTargets(9/12)),0);
+  assert.equal(layerReveal(6,7,revealTargets(1)),1);
 });
 
 test('pointer travel rotates regardless of DPR; vertical tilt stays bounded', () => {
