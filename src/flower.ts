@@ -162,6 +162,7 @@ export class FlowerScene {
     this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure=1.02;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
+    this.renderer.transmissionResolutionScale=.85;
     const room=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(this.renderer);
     this.environment=pmrem.fromScene(room,.04);this.scene.environment=this.environment.texture;this.scene.environmentIntensity=.55;
     room.dispose();pmrem.dispose();
@@ -176,7 +177,7 @@ export class FlowerScene {
     this.scene.add(this.key,this.fill,this.heart,this.sparkle,this.keyArea,this.rimArea,this.backArea);
     const gl=this.renderer.getContext() as WebGL2RenderingContext;
     const available=Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER,gl.RGBA16F,gl.SAMPLES) as Int32Array ?? []);
-    const samples=supportedSamples(available,matchMedia('(pointer: coarse)').matches?4:8);
+    const samples=supportedSamples(available,4);
     const target=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples});
     target.texture.name='Floral.HDR.Supersampled.MSAA';
     this.photoSamples=supportedSamples(available,4);

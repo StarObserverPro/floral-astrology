@@ -85,7 +85,10 @@ function petalMaterial(uniforms: PetalUniforms, metal=false): THREE.MeshPhysical
       #include <beginnormal_vertex>
       vec3 du=petalPoint(vec3(position.x+.0005,position.y,position.z))-petalPoint(vec3(position.x-.0005,position.y,position.z));
       vec3 dv=petalPoint(vec3(position.x,position.y+.0005,position.z))-petalPoint(vec3(position.x,position.y-.0005,position.z));
-      objectNormal=normalize(cross(du,dv))*sign(position.z);
+      // The two rim strips run in opposite parameter directions. Match each
+      // strip's winding, or one edge lights its underside and sparkles falsely.
+      float stripNormal=abs(position.y)>1.5?sign(position.y):1.0;
+      objectNormal=normalize(cross(du,dv))*sign(position.z)*stripNormal;
     `);
     shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',/* glsl */`
       vec3 transformed=petalPoint(position);
