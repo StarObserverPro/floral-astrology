@@ -131,7 +131,11 @@ export class FlowerScene {
     const room=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(this.renderer);
     this.environment=pmrem.fromScene(room,.04);this.scene.environment=this.environment.texture;this.scene.environmentIntensity=.55;
     room.dispose();pmrem.dispose();
-    const background=new THREE.Mesh(new THREE.PlaneGeometry(2,2),new THREE.MeshBasicMaterial({map:this.atmosphere.target.texture,depthTest:false,depthWrite:false,toneMapped:false}));
+    const background=new THREE.Mesh(new THREE.PlaneGeometry(2,2),new THREE.ShaderMaterial({
+      uniforms:{tAir:{value:this.atmosphere.target.texture}},depthTest:false,depthWrite:false,toneMapped:false,
+      vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,.9999,1.);}',
+      fragmentShader:'varying vec2 vUv;uniform sampler2D tAir;void main(){gl_FragColor=texture2D(tAir,vUv);}',
+    }));
     background.frustumCulled=false;background.renderOrder=-1000;
     this.scene.add(background,this.motes,this.flower.root,this.ambient);
     this.key.position.set(4,7,5);this.fill.position.set(-5,2,-2);

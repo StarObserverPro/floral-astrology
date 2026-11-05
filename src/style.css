@@ -215,7 +215,7 @@ h1 {
   flex-direction: column;
   gap: 8px;
 }
-.view-controls .icon-button { position: static; }
+.view-controls .icon-button { position: relative; }
 .photo-dialog {
   width: min(400px, calc(100vw - 40px), 56svh);
   max-width: none;
@@ -239,7 +239,7 @@ h1 {
 .photo-close { top: 7px; right: 7px; color: #e9dfce; background: #13132070; }
 .photo-close:hover { color: #ffffff; }
 .photo-actions { display: flex; justify-content: center; gap: 20px; padding-top: 12px; }
-.photo-actions .icon-button { position: static; color: #e7d9bf; }
+.photo-actions .icon-button { position: relative; color: #e7d9bf; }
 .photo-actions a { text-decoration: none; }
 .photo-save[aria-disabled='true'] { opacity: .25; cursor: default; }
 .photo-status { font-family: system-ui, sans-serif; text-align: center; color: #eee2ce; font-size: 14px; line-height: 1.7; margin: 8px 0 0; }
