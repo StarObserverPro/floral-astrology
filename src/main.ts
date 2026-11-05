@@ -1,6 +1,7 @@
 import './style.css';
 import { FlowerScene, PALETTES } from './flower.ts';
 import { FlowerFallback } from './flower-fallback.ts';
+import { PhotoDialog } from './photo.ts';
 import { QUESTIONS, answerAt, flowerReading, profileFromAnswers, resultType } from './quiz.ts';
 import type { Answer } from './quiz.ts';
 
@@ -9,6 +10,8 @@ const sun = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx=
 const moon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z"/><path d="m17 3 .5 1.5L19 5l-1.5.5L17 7l-.5-1.5L15 5l1.5-.5Z"/></svg>';
 const back = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>';
 const again = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10a8 8 0 1 1 .8 6.1M4 4v6h6"/></svg>';
+const camera = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 6l1.5-3h5L16 6h5v15H3V6Z"/><circle cx="12" cy="13" r="4"/></svg>';
+const orbit = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="4.5" transform="rotate(-22 12 12)"/><path d="m15 3 4 1-1 4M8 21l-4-1 1-4"/><path d="M12 8v8"/></svg>';
 
 app.innerHTML = `
   <div id="scene" aria-busy="true"></div>
@@ -31,6 +34,10 @@ app.innerHTML = `
     ${QUESTIONS.map((_, index) => `<span data-step="${index}" aria-hidden="true"></span>`).join('')}
   </div>
   <button id="restart" class="icon-button restart-button" aria-label="再开一朵" hidden>${again}</button>
+  <div class="view-controls" role="group" aria-label="观看花朵">
+    <button id="reset-view" class="icon-button" aria-label="恢复默认视角" disabled>${orbit}</button>
+    <button id="camera" class="icon-button" aria-label="拍照" disabled>${camera}</button>
+  </div>
 `;
 
 const sceneElement = document.querySelector<HTMLElement>('#scene')!;
@@ -50,6 +57,13 @@ const restartButton = document.querySelector<HTMLButtonElement>('#restart')!;
 const reading = document.querySelector<HTMLElement>('#reading')!;
 const progress = document.querySelector<HTMLElement>('#progress')!;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const cameraButton = document.querySelector<HTMLButtonElement>('#camera')!;
+const viewButton = document.querySelector<HTMLButtonElement>('#reset-view')!;
+const photos = new PhotoDialog(app, () => scene, () => ({
+  type: answers.length === QUESTIONS.length ? resultType(answers) : undefined, theme,
+}));
+cameraButton.addEventListener('click', () => { void photos.open(cameraButton); });
+viewButton.addEventListener('click', () => scene?.resetView());
 
 function updateProgress(): void {
   progress.setAttribute('aria-valuenow', String(answers.length));
@@ -177,6 +191,8 @@ requestAnimationFrame(() => {
     scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length);
     scene.setTheme(theme, true);
   }
+  cameraButton.disabled = false;
+  viewButton.disabled = false;
 });
 
 sceneElement.addEventListener('flower-context-lost', () => { document.documentElement.dataset.rendered = 'false'; });
@@ -191,5 +207,6 @@ if (new URLSearchParams(location.search).has('qa')) {
 
 if (import.meta.hot) import.meta.hot.dispose(() => {
   if (transitionTimer) clearTimeout(transitionTimer);
+  photos.dispose();
   scene?.dispose();
 });

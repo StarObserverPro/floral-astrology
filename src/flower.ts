@@ -3,8 +3,12 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { approach, lerp, seededRandom, smooth } from './math.ts';
+import { approach, lerp, seededRandom } from './math.ts';
+import { BLOOM_STAGE_NAMES, bloomStage, petalOpening, petalScale, revealTargets } from './bloom.ts';
+import { FlowerRotation } from './rotation.ts';
 import type { FlowerProfile } from './quiz.ts';
 
 export const PALETTES = [
@@ -20,6 +24,7 @@ type ShapeUniforms = {
   uDream: Uniform<number>; uColorA: Uniform<THREE.Color>; uColorB: Uniform<THREE.Color>;
 };
 type Petal = { pivot: THREE.Group; layer: number; angle: number; offset: number; phase: number };
+type FloatingCrystal = { object: THREE.Group; angle: number; height: number; radius: number; phase: number; speed: number; reveal: number };
 
 const shapeGLSL = /* glsl */`
 uniform float uLength;
@@ -47,7 +52,7 @@ vec3 petalPoint(vec3 p) {
   float curl = s*s * wave * mix(.22, .44, uSoftness);
   float height = t*t * mix(.30, .44, uSoftness) + curl + ridge;
   height += sin(t*5.0) * s * uDream * .035;
-  return vec3(x, height * uLength + p.z * .014 * wave, t * uLength);
+  return vec3(x, height * uLength + p.z * .025 * wave, t * uLength);
 }
 `;
 
@@ -92,20 +97,21 @@ function makePetalGeometry(border = false): THREE.BufferGeometry {
 function shapeMaterial(uniforms: ShapeUniforms, metal = false): THREE.MeshPhysicalMaterial {
   const material = new THREE.MeshPhysicalMaterial({
     color: metal ? '#d3b881' : '#ffffff',
-    metalness: metal ? .92 : .04,
-    roughness: metal ? .24 : .16,
-    transmission: metal ? 0 : .78,
-    thickness: .5,
-    ior: 1.46,
+    metalness: metal ? .94 : 0,
+    roughness: metal ? .20 : .065,
+    transmission: metal ? 0 : .95,
+    thickness: .58,
+    ior: metal ? 1.46 : 1.68,
+    dispersion: metal ? 0 : .28,
     clearcoat: 1,
-    clearcoatRoughness: .16,
-    iridescence: metal ? .05 : .34,
+    clearcoatRoughness: .065,
+    iridescence: metal ? .035 : .12,
     iridescenceIOR: 1.3,
     iridescenceThicknessRange: [160, 390],
-    attenuationColor: '#dfc6ee',
-    attenuationDistance: 3.5,
+    attenuationColor: '#eee6fa',
+    attenuationDistance: 2.8,
     side: THREE.DoubleSide,
-    envMapIntensity: metal ? 1.5 : 1.3,
+    envMapIntensity: metal ? 1.7 : 1.65,
   });
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, uniforms);
@@ -131,11 +137,11 @@ function shapeMaterial(uniforms: ShapeUniforms, metal = false): THREE.MeshPhysic
         #include <color_fragment>
         float blend = smoothstep(.05, .94, vPetal.x) * (.20 + .65*uDream);
         blend += abs(vPetal.y) * .12;
-        diffuseColor.rgb *= mix(uColorA, uColorB, blend);
+        diffuseColor.rgb *= mix(mix(uColorA, uColorB, blend), vec3(1.0), .30);
       `);
     }
   };
-  material.customProgramCacheKey = () => metal ? 'floral-lamina-gold-v1' : 'floral-lamina-glass-v1';
+  material.customProgramCacheKey = () => metal ? 'floral-lamina-gold-v2' : 'floral-lamina-glass-v2';
   return material;
 }
 
@@ -230,6 +236,8 @@ export class FlowerScene {
   private camera = new THREE.PerspectiveCamera(34, 1, .1, 60);
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
+  private smaa: SMAAPass;
+  private rotation: FlowerRotation;
   private root = new THREE.Group();
   private petals: Petal[] = [];
   private shapes: ShapeUniforms[] = [];
@@ -238,9 +246,19 @@ export class FlowerScene {
   private core: THREE.Mesh;
   private ornaments = new THREE.Group();
   private halo = new THREE.Group();
+  private stamens = new THREE.Group();
+  private floating: FloatingCrystal[] = [];
+  private haloBands: THREE.Mesh[] = [];
+  private reveals = [0, 0, 0, 0];
+  private revealTargets = [0, 0, 0, 0];
+  private unlockedStage = 0;
   private key = new THREE.DirectionalLight('#ffe3c7', 4);
   private fill = new THREE.DirectionalLight('#b6caff', 2.8);
-  private heart = new THREE.PointLight('#edc0f8', 8, 7, 2);
+  private heart = new THREE.PointLight('#f7ccfa', 5, 7, 2);
+  private sparkle = new THREE.PointLight('#fff1dc', 15, 10, 2);
+  private keyArea = new THREE.RectAreaLight('#fff0dc', 4.6, 3.5, 5.0);
+  private rimArea = new THREE.RectAreaLight('#cbdcff', 5.0, .65, 4.5);
+  private backArea = new THREE.RectAreaLight('#efcdec', 3.5, 4.5, 2.8);
   private ambient = new THREE.HemisphereLight('#e2dcff', '#302430', 1.6);
   private profile: FlowerProfile = { outward: .5, dream: .5, softness: .5, freedom: .5 };
   private target = { ...this.profile };
@@ -252,8 +270,6 @@ export class FlowerScene {
   private colorB = new THREE.Color(PALETTES[0].b);
   private nextA = this.colorA.clone();
   private nextB = this.colorB.clone();
-  private pointer = new THREE.Vector2();
-  private parallax = new THREE.Vector2();
   private clock = 0;
   private last = 0;
   private disposed = false;
@@ -274,13 +290,15 @@ export class FlowerScene {
     this.canvas.setAttribute('aria-label', '随回答逐渐绽放的水晶花');
     this.canvas.setAttribute('role', 'img');
     this.canvas.setAttribute('data-flower', '');
+    this.canvas.dataset.renderer = 'webgl';
     container.append(this.canvas);
+    this.rotation = new FlowerRotation(this.canvas);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     const room = new RoomEnvironment();
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.environment = pmrem.fromScene(room, .045);
+    this.environment = pmrem.fromScene(room, .025);
     this.scene.environment = this.environment.texture;
     room.dispose();
     pmrem.dispose();
@@ -292,19 +310,35 @@ export class FlowerScene {
     this.key.position.set(4, 7, 5);
     this.fill.position.set(-5, 2, -2);
     this.heart.position.set(0, .9, .2);
-    this.scene.add(this.key, this.fill, this.heart);
+    this.sparkle.position.set(2.5, 2.9, 3.6);
+    RectAreaLightUniformsLib.init();
+    this.keyArea.position.set(-3.4, 3.6, 4.2);
+    this.rimArea.position.set(3.7, 1.6, 1.8);
+    this.backArea.position.set(-1.6, 3.1, -3.1);
+    for (const area of [this.keyArea, this.rimArea, this.backArea]) area.lookAt(0, .6, 0);
+    this.scene.add(this.key, this.fill, this.heart, this.sparkle, this.keyArea, this.rimArea, this.backArea);
     this.camera.position.set(0, 4.8, 10.5);
     this.camera.lookAt(0, .2, 0);
-    this.composer = new EffectComposer(this.renderer);
+    // The default framebuffer's antialias flag does not cover composer targets.
+    // Query the actual HDR format, then add morphological AA before tone mapping.
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const supported = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) as Int32Array | null;
+    const sampleCeiling = matchMedia('(pointer: coarse)').matches ? 2 : 4;
+    const samples = Math.max(0, ...Array.from(supported ?? []).filter(n => n <= sampleCeiling));
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples });
+    target.texture.name = 'Floral.HDR.MSAA';
+    this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .5, .75, 1.05);
     this.composer.addPass(this.bloom);
+    this.smaa = new SMAAPass();
+    this.composer.addPass(this.smaa);
     this.composer.addPass(new OutputPass());
     this.createFlower();
-    this.core = new THREE.Mesh(new THREE.IcosahedronGeometry(.25, 1), new THREE.MeshPhysicalMaterial({
-      color: '#f8e8c8', roughness: .16, metalness: .25, transmission: .55,
-      thickness: .8, ior: 1.9, emissive: '#b57a9c', emissiveIntensity: .18,
-      clearcoat: 1, envMapIntensity: 1.5,
+    this.core = new THREE.Mesh(new THREE.IcosahedronGeometry(.25, 0), new THREE.MeshPhysicalMaterial({
+      color: '#f2defb', roughness: .055, metalness: 0, transmission: .96,
+      thickness: 1.1, ior: 1.78, dispersion: .42, emissive: '#b57a9c', emissiveIntensity: .10,
+      clearcoat: 1, clearcoatRoughness: .04, envMapIntensity: 1.8, flatShading: true,
     }));
     this.core.position.y = .44;
     this.core.scale.set(.8, 1.6, .8);
@@ -312,11 +346,11 @@ export class FlowerScene {
     this.createSetting();
     this.resizeObserver = new ResizeObserver(this.resize);
     this.resizeObserver.observe(container);
-    window.addEventListener('pointermove', this.onPointer, { passive: true });
     document.addEventListener('visibilitychange', this.onVisibility);
     this.canvas.addEventListener('webglcontextlost', this.onContextLost);
     this.canvas.addEventListener('webglcontextrestored', this.onContextRestored);
     this.resize();
+    this.renderer.info.autoReset = false;
     this.frame = requestAnimationFrame(this.tick);
   }
 
@@ -351,8 +385,9 @@ export class FlowerScene {
   private createSetting(): void {
     const gold = new THREE.MeshPhysicalMaterial({ color: '#c7ab78', metalness: .94, roughness: .27, clearcoat: .6 });
     const darkGold = gold.clone(); darkGold.color.set('#786648'); darkGold.roughness = .4;
-    const jewel = new THREE.MeshPhysicalMaterial({ color: '#d8c6e9', metalness: .12, roughness: .14,
-      transmission: .65, thickness: .4, ior: 1.7, clearcoat: 1, envMapIntensity: 1.4 });
+    const jewel = new THREE.MeshPhysicalMaterial({ color: '#e7dff4', metalness: 0, roughness: .055,
+      transmission: .95, thickness: .6, ior: 1.72, dispersion: .35, clearcoat: 1, envMapIntensity: 1.8,
+      flatShading: true });
     const cup = new THREE.Mesh(new THREE.SphereGeometry(.43, 40, 24, 0, Math.PI*2, Math.PI*.48, Math.PI*.52), gold);
     cup.position.y = .2;
     cup.scale.set(1, .65, 1);
@@ -362,7 +397,7 @@ export class FlowerScene {
       new THREE.Vector3(.12, -.95, -.05), new THREE.Vector3(0, -1.48, 0),
     ]);
     const stem = new THREE.Mesh(new THREE.TubeGeometry(stemCurve, 38, .028, 8, false), gold);
-    this.root.add(stem, this.ornaments, this.halo);
+    this.root.add(stem, this.ornaments, this.halo, this.stamens);
     for (let k = 0; k < 3; k++) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(.53+k*.24, .008-k*.001, 8, 120), k === 2 ? darkGold : gold);
       ring.rotation.x = Math.PI/2 + (k-1)*.11;
@@ -377,18 +412,19 @@ export class FlowerScene {
       const anther = new THREE.Mesh(new THREE.OctahedronGeometry(.047, 0), gold);
       anther.position.set(Math.cos(a)*.36, .55+Math.sin(i*1.7)*.06, Math.sin(a)*.36);
       anther.scale.y = 1.8;
-      this.root.add(anther);
+      this.stamens.add(anther);
       const thread = new THREE.CatmullRomCurve3([
         new THREE.Vector3(Math.cos(a)*.15,.25,Math.sin(a)*.15),
         new THREE.Vector3(Math.cos(a)*.34,.40,Math.sin(a)*.34), anther.position,
       ]);
-      this.root.add(new THREE.Mesh(new THREE.TubeGeometry(thread, 12, .006, 4, false), gold));
+      this.stamens.add(new THREE.Mesh(new THREE.TubeGeometry(thread, 12, .006, 4, false), gold));
     }
     for (let i = 0; i < 2; i++) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(2.6+i*.12, .0035, 4, 180), darkGold);
       ring.rotation.x = Math.PI/2 - .65;
       ring.position.set(0, .2, -1.1);
       this.halo.add(ring);
+      this.haloBands.push(ring);
     }
     for (let i = 0; i < 12; i++) {
       const a = i/12*Math.PI*2;
@@ -396,12 +432,29 @@ export class FlowerScene {
       star.position.set(Math.cos(a)*2.72, Math.sin(a)*1.65+.2, Math.sin(a)*1.3-1.1);
       this.halo.add(star);
     }
+    const shardGeometry = new THREE.OctahedronGeometry(.095, 0);
+    const bandGeometry = new THREE.TorusGeometry(.065, .005, 4, 16);
+    for (let i = 0; i < 14; i++) {
+      const object = new THREE.Group();
+      const shard = new THREE.Mesh(shardGeometry, jewel);
+      shard.scale.set(.70, 1.8+(i%3)*.4, .70);
+      const band = new THREE.Mesh(bandGeometry, gold);
+      band.rotation.x = Math.PI/2;
+      object.add(shard, band);
+      this.root.add(object);
+      this.floating.push({ object, angle: i/14*Math.PI*2,
+        height: .25+(i%4)*.28, radius: i<6 ? 1.75+(i%3)*.11 : 2.04+(i%3)*.08,
+        phase: i*2.399963, speed: (i%2 ? 1 : -1)*(.045+(i%3)*.011), reveal: i<6 ? 1 : 3 });
+    }
   }
 
   setProfile(profile: FlowerProfile, progress: number, reset = false): void {
     this.target = { ...profile };
     const target = .18 + progress * .82;
     this.growthTarget = reset ? target : Math.max(this.growthTarget, target);
+    this.unlockedStage = reset ? bloomStage(progress) : Math.max(this.unlockedStage, bloomStage(progress));
+    this.revealTargets = revealTargets(this.unlockedStage/4);
+    this.canvas.dataset.bloomStage = BLOOM_STAGE_NAMES[this.unlockedStage];
   }
 
   setTheme(theme: 'dawn' | 'night', immediate = false): void {
@@ -415,10 +468,40 @@ export class FlowerScene {
     this.nextA.set(palette.a); this.nextB.set(palette.b);
   }
 
-  private onPointer = (event: PointerEvent): void => {
-    if (event.pointerType !== 'mouse') return;
-    this.pointer.set(event.clientX / innerWidth * 2 - 1, event.clientY / innerHeight * 2 - 1);
-  };
+  resetView(): void { this.rotation.reset(); }
+
+  snapshot(width: number, height: number): HTMLCanvasElement {
+    if (this.renderer.getContext().isContextLost()) throw new Error('The graphics context is unavailable.');
+    const box = this.container.getBoundingClientRect();
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const originalSamples = this.composer.renderTarget1.samples;
+    try {
+      // Reuse this scene/context and the current pose. Capture before yielding,
+      // then restore the interactive buffer before asynchronous PNG encoding.
+      this.composer.renderTarget1.samples = this.composer.renderTarget2.samples = Math.min(originalSamples, 2);
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(width, height, false);
+      this.composer.setPixelRatio(1);
+      this.composer.setSize(width, height);
+      this.camera.aspect = width/height;
+      this.camera.fov = 37;
+      this.camera.position.set(0, 4.8, 10.5);
+      this.camera.lookAt(0, .72, 0);
+      this.camera.updateProjectionMatrix();
+      this.atmosphere.uniforms.uAspect.value = width/height;
+      this.motes.material.uniforms.uDpr.value = 1;
+      this.composer.render();
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('The photo canvas is unavailable.');
+      context.drawImage(this.canvas, 0, 0);
+      return canvas;
+    } finally {
+      this.composer.renderTarget1.samples = this.composer.renderTarget2.samples = originalSamples;
+      this.applySize(box.width, box.height);
+      this.composer.render();
+    }
+  }
 
   private onVisibility = (): void => {
     if (document.hidden) cancelAnimationFrame(this.frame);
@@ -471,6 +554,7 @@ export class FlowerScene {
       this.profile[key] = approach(this.profile[key], this.target[key], dt, this.reduced ? .15 : 2.2);
     }
     this.growth = approach(this.growth, this.growthTarget, dt, this.reduced ? .15 : 2.2);
+    for (let i=0; i<this.reveals.length; i++) this.reveals[i] = approach(this.reveals[i], this.revealTargets[i], dt, this.reduced ? .15 : 1.65);
     this.dawn = approach(this.dawn, this.dawnTarget, dt, .65);
     this.colorA.lerp(this.nextA, 1-Math.exp(-dt*2.4));
     this.colorB.lerp(this.nextB, 1-Math.exp(-dt*2.4));
@@ -483,35 +567,59 @@ export class FlowerScene {
     }
     for (const petal of this.petals) {
       const { pivot, layer, phase, offset } = petal;
-      const maturity = smooth(layer*.13, .58+layer*.13, this.growth);
-      const open = lerp(-1.38 + layer*.10, -.22 + layer*.17 + (1-p.outward)*-.44, maturity);
-      pivot.rotation.x = open + Math.sin(motionTime*.45+phase)*.008*p.freedom*maturity;
+      const reveal = this.reveals[layer];
+      const open = petalOpening(layer, p.outward, reveal);
+      pivot.rotation.x = open + Math.sin(motionTime*.45+phase)*.015*p.freedom*reveal;
       pivot.rotation.z = offset * p.freedom * .22;
-      pivot.position.z = .13 + maturity * p.dream * (.10+layer*.018);
-      pivot.position.y = Math.sin(phase+motionTime*.32)*.025*p.dream*maturity;
-      const size = lerp(.26+layer*.03, 1, maturity);
+      pivot.position.z = .13 + reveal * p.dream * (.10+layer*.018);
+      pivot.position.y = Math.sin(phase+motionTime*.32)*.03*p.dream*reveal;
+      const size = petalScale(layer, this.growth, reveal);
       pivot.scale.set(size, size, size);
+      pivot.visible = layer === 0 || reveal > .025;
       if (pivot.parent) pivot.parent.rotation.y = petal.angle + offset*p.freedom*.25;
     }
-    this.root.rotation.y = Math.sin(motionTime*.09)*.065;
+    this.rotation.update(dt, this.reduced);
+    const view = this.rotation.state;
+    this.root.rotation.set(view.pitch, view.yaw, view.roll, 'ZXY');
     this.root.position.y = Math.sin(motionTime*.65)*.022;
     this.ornaments.rotation.y = motionTime*.025;
+    this.ornaments.rotation.z = Math.sin(motionTime*.33)*.045;
     this.core.rotation.y = motionTime*.13;
-    this.core.scale.setScalar(.65+this.growth*.35);
+    this.core.scale.setScalar(.12+this.reveals[2]*.88);
     this.core.scale.y *= 1.65;
+    this.stamens.visible = this.reveals[2] > .025;
+    this.stamens.scale.setScalar(Math.max(.001, this.reveals[2]));
+    this.stamens.rotation.y = Math.sin(motionTime*.17)*.08;
     this.halo.rotation.z = Math.sin(motionTime*.06)*.015;
-    this.parallax.lerp(this.pointer, 1-Math.exp(-dt*2));
-    this.root.rotation.z = this.reduced ? 0 : -this.parallax.x*.025;
+    for (let i=0; i<this.haloBands.length; i++) {
+      this.haloBands[i].rotation.y = Math.sin(motionTime*(.07+i*.012)+i)*.14;
+      this.haloBands[i].rotation.z = motionTime*(i ? -.018 : .012);
+    }
+    for (const crystal of this.floating) {
+      const reveal = this.reveals[crystal.reveal];
+      crystal.object.visible = reveal > .025;
+      const angle = crystal.angle+motionTime*crystal.speed;
+      const radius = crystal.radius+p.dream*.12;
+      crystal.object.position.set(Math.cos(angle)*radius,
+        crystal.height+Math.sin(motionTime*.48+crystal.phase)*.12, Math.sin(angle)*radius);
+      crystal.object.rotation.set(motionTime*.15+crystal.phase, motionTime*.29+crystal.phase, Math.sin(motionTime*.25+crystal.phase)*.13);
+      crystal.object.scale.setScalar(Math.max(.001, reveal));
+    }
     this.atmosphere.uniforms.uDawn.value = this.dawn;
     this.atmosphere.uniforms.uTime.value = motionTime;
     this.motes.material.uniforms.uTime.value = motionTime;
     this.motes.material.uniforms.uDawn.value = this.dawn;
-    this.key.intensity = lerp(3.0, 4.4, this.dawn);
-    this.fill.intensity = lerp(2.7, 1.5, this.dawn);
-    this.ambient.intensity = lerp(1.0, 1.8, this.dawn);
-    this.heart.intensity = lerp(3.8, 1.2, this.dawn);
-    this.bloom.strength = lerp(.48, .25, this.dawn);
-    this.renderer.toneMappingExposure = lerp(1.08, .95, this.dawn);
+    this.key.intensity = lerp(.85, 1.65, this.dawn);
+    this.fill.intensity = lerp(.55, .65, this.dawn);
+    this.ambient.intensity = lerp(.42, .72, this.dawn);
+    this.heart.intensity = lerp(3.6, 1.0, this.dawn)*(.7+.3*this.reveals[2]);
+    this.sparkle.intensity = lerp(15, 11, this.dawn)*(1+Math.sin(motionTime*.27)*.055);
+    this.keyArea.intensity = lerp(4.5, 6.0, this.dawn);
+    this.rimArea.intensity = lerp(5.0, 3.1, this.dawn);
+    this.backArea.intensity = lerp(3.6, 3.0, this.dawn);
+    this.bloom.strength = lerp(.32, .19, this.dawn);
+    this.renderer.toneMappingExposure = lerp(1.04, .92, this.dawn);
+    this.renderer.info.reset();
     this.composer.render();
     if (this.frame && this.clock > 3 && rawDt < .4) {
       this.sampleTime += rawDt; this.sampleFrames++;
@@ -538,6 +646,9 @@ export class FlowerScene {
     return {
       webgl: this.renderer.capabilities.isWebGL2, dpr: this.dpr,
       growth: this.growth, targetGrowth: this.growthTarget, profile: { ...this.profile },
+      stage: BLOOM_STAGE_NAMES[this.unlockedStage], reveals: [...this.reveals],
+      rotation: { yaw: this.rotation.state.yaw, pitch: this.rotation.state.pitch },
+      antialias: { samples: this.composer.renderTarget1.samples, smaa: this.smaa.enabled },
       geometries: this.renderer.info.memory.geometries, textures: this.renderer.info.memory.textures,
       calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles,
       contextLost: this.renderer.getContext().isContextLost(),
@@ -548,7 +659,7 @@ export class FlowerScene {
     this.disposed = true;
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
-    window.removeEventListener('pointermove', this.onPointer);
+    this.rotation.dispose();
     document.removeEventListener('visibilitychange', this.onVisibility);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored);

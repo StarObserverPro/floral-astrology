@@ -46,6 +46,8 @@ button:disabled { cursor: default; }
 #app { position: relative; width: 100%; min-height: 640px; height: 100svh; overflow: hidden; isolation: isolate; }
 #scene { position: absolute; inset: 0; background: #111322; }
 #scene canvas { display: block; width: 100%; height: 100%; opacity: 0; transition: opacity 1.6s ease; }
+#scene canvas { touch-action: none; cursor: grab; }
+#scene canvas.is-dragging { cursor: grabbing; }
 :root[data-rendered='true'] #scene canvas { opacity: 1; }
 .frame-glow {
   position: absolute;
@@ -71,6 +73,7 @@ button:disabled { cursor: default; }
   transition: color .3s ease, opacity .4s ease, transform .4s ease;
 }
 .icon-button:hover { color: var(--ink); transform: rotate(-6deg); }
+.icon-button:disabled { opacity: .3; }
 .icon-button svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.05; stroke-linecap: round; stroke-linejoin: round; }
 .theme-button { top: max(26px, env(safe-area-inset-top)); right: 32px; }
 .back-button { top: max(26px, env(safe-area-inset-top)); left: 32px; }
@@ -232,10 +235,62 @@ h1 {
 .graphics-retry { top: calc(50% - 22px); left: calc(50% - 22px); }
 .render-fallback { background: radial-gradient(ellipse at center, #53425f, #111322 70%); }
 
+.view-controls {
+  position: absolute;
+  right: 27px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.view-controls .icon-button { position: static; }
+.photo-dialog {
+  width: min(400px, calc(100vw - 40px), 56svh);
+  max-width: none;
+  max-height: calc(100svh - 28px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+.photo-dialog::backdrop { background: #070811bd; backdrop-filter: blur(9px); }
+.photo-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: #171827;
+  border-radius: 4px;
+  box-shadow: 0 18px 80px #00000040;
+}
+.photo-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.photo-close { top: 7px; right: 7px; color: #e9dfce; background: #13132070; }
+.photo-close:hover { color: #ffffff; }
+.photo-actions { display: flex; justify-content: center; gap: 20px; padding-top: 12px; }
+.photo-actions .icon-button { position: static; color: #e7d9bf; }
+.photo-actions a { text-decoration: none; }
+.photo-save[aria-disabled='true'] { opacity: .25; cursor: default; }
+.photo-status { font-family: system-ui, sans-serif; text-align: center; color: #eee2ce; font-size: 14px; line-height: 1.7; margin: 8px 0 0; }
+.photo-loading {
+  position: absolute;
+  top: calc(50% - 13px);
+  left: calc(50% - 13px);
+  width: 26px;
+  height: 26px;
+  border: 1px solid #c6ad8030;
+  border-top-color: #c6ad80;
+  border-radius: 50%;
+  animation: photo-spin 1s linear infinite;
+}
+.photo-dialog[data-loading='false'] .photo-loading { display: none; }
+@keyframes photo-spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 700px) {
   #app { min-height: 580px; }
   .theme-button { top: max(16px, env(safe-area-inset-top)); right: 15px; }
   .back-button { top: max(16px, env(safe-area-inset-top)); left: 15px; }
+  .view-controls { right: 9px; gap: 6px; }
   .question-copy { top: 12.8%; width: 86%; }
   h1 { font-size: clamp(24px, 5.8vw, 29px); line-height: 1.8; letter-spacing: .075em; }
   .question-opening { display: block; }
