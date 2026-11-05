@@ -147,6 +147,8 @@ export class FlowerScene {
   private sampleTime=0;
   private dpr=1;
   private slowWindows=0;
+  private photoSamples=4;
+  private frameMs=0;
   private reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   private environment:THREE.WebGLRenderTarget;
   private resizeObserver:ResizeObserver;
@@ -161,7 +163,7 @@ export class FlowerScene {
     this.renderer.toneMappingExposure=1.02;
     this.renderer.outputColorSpace=THREE.SRGBColorSpace;
     const room=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(this.renderer);
-    this.environment=pmrem.fromScene(room,.04);this.scene.environment=this.environment.texture;
+    this.environment=pmrem.fromScene(room,.04);this.scene.environment=this.environment.texture;this.scene.environmentIntensity=.55;
     room.dispose();pmrem.dispose();
     const background=new THREE.Mesh(new THREE.PlaneGeometry(2,2),this.atmosphere);
     background.frustumCulled=false;background.renderOrder=-1000;
@@ -177,9 +179,10 @@ export class FlowerScene {
     const samples=supportedSamples(available,matchMedia('(pointer: coarse)').matches?4:8);
     const target=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples});
     target.texture.name='Floral.HDR.Supersampled.MSAA';
+    this.photoSamples=supportedSamples(available,4);
     this.composer=new EffectComposer(this.renderer,target);
     this.composer.addPass(new RenderPass(this.scene,this.camera));
-    this.bloom=new UnrealBloomPass(new THREE.Vector2(1,1),.22,.65,1.2);this.composer.addPass(this.bloom);
+    this.bloom=new UnrealBloomPass(new THREE.Vector2(1,1),.14,.60,1.65);this.composer.addPass(this.bloom);
     this.smaa=new SMAAPass();this.composer.addPass(this.smaa);this.composer.addPass(new OutputPass());
     this.resizeObserver=new ResizeObserver(this.resize);this.resizeObserver.observe(container);
     document.addEventListener('visibilitychange',this.onVisibility);
@@ -210,9 +213,11 @@ export class FlowerScene {
     if(this.renderer.getContext().isContextLost())throw new Error('The graphics context is unavailable.');
     const box=this.container.getBoundingClientRect(),canvas=document.createElement('canvas');
     canvas.width=width;canvas.height=height;
+    const samples=this.composer.renderTarget1.samples;
     try {
       // One physical render, including solid rims and the exact current pose.
       // Retain supported MSAA levels when capturing; never assume 2 is supported.
+      this.composer.renderTarget1.samples=this.composer.renderTarget2.samples=this.photoSamples;
       this.renderer.setPixelRatio(1);this.renderer.setSize(width,height,false);
       this.composer.setPixelRatio(1);this.composer.setSize(width,height);
       this.camera.aspect=width/height;this.camera.fov=39;
@@ -221,7 +226,7 @@ export class FlowerScene {
       this.composer.render();
       const context=canvas.getContext('2d');if(!context)throw new Error('The photo canvas is unavailable.');
       context.drawImage(this.canvas,0,0);return canvas;
-    } finally {this.applySize(box.width,box.height);this.composer.render();}
+    } finally {this.composer.renderTarget1.samples=this.composer.renderTarget2.samples=samples;this.applySize(box.width,box.height);this.composer.render();}
   }
 
   private onVisibility=():void=>{
@@ -253,12 +258,12 @@ export class FlowerScene {
 
   private tick=(now:number):void=>{
     if(this.disposed||document.hidden)return;
-    const rawDt=this.last?(now-this.last)/1000:1/60,dt=Math.min(.07,rawDt);
+    const rawDt=this.last?(now-this.last)/1000:1/60,dt=Math.min(.25,rawDt);
     this.last=now;this.clock+=dt;
     const time=this.reduced?0:this.clock;
-    for(const key of Object.keys(this.profile) as (keyof FlowerProfile)[]) this.profile[key]=approach(this.profile[key],this.target[key],dt,this.reduced?.15:2.2);
-    this.growth=approach(this.growth,this.growthTarget,dt,this.reduced?.15:2.2);
-    for(let i=0;i<4;i++)this.reveals[i]=approach(this.reveals[i],this.revealTargets[i],dt,this.reduced?.15:1.3);
+    for(const key of Object.keys(this.profile) as (keyof FlowerProfile)[]) this.profile[key]=approach(this.profile[key],this.target[key],dt,this.reduced ? .15 : 2.2);
+    this.growth=approach(this.growth,this.growthTarget,dt,this.reduced ? .15 : 2.2);
+    for(let i=0;i<4;i++)this.reveals[i]=approach(this.reveals[i],this.revealTargets[i],dt,this.reduced ? .15 : 1.3);
     this.dawn=approach(this.dawn,this.dawnTarget,dt,.65);
     this.colorA.lerp(this.nextA,1-Math.exp(-dt*2.4));this.colorB.lerp(this.nextB,1-Math.exp(-dt*2.4));
     this.flower.update(dt,time,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
@@ -266,15 +271,16 @@ export class FlowerScene {
     this.flower.root.rotation.set(view.pitch,view.yaw,view.roll,'ZXY');this.flower.root.position.y=Math.sin(time*.65)*.018;
     this.atmosphere.uniforms.uDawn.value=this.dawn;this.atmosphere.uniforms.uTime.value=time;
     this.motes.material.uniforms.uTime.value=time;this.motes.material.uniforms.uDawn.value=this.dawn;
-    this.key.intensity=lerp(.65,1.25,this.dawn);this.fill.intensity=lerp(.45,.6,this.dawn);this.ambient.intensity=lerp(.40,.7,this.dawn);
-    this.heart.intensity=lerp(2.3,.85,this.dawn)*(.4+.6*this.reveals[2]);this.sparkle.intensity=lerp(8,6,this.dawn);
-    this.keyArea.intensity=lerp(4.5,5.7,this.dawn);this.rimArea.intensity=lerp(4.2,3.1,this.dawn);this.backArea.intensity=lerp(3.3,3,this.dawn);
-    this.bloom.strength=lerp(.21,.13,this.dawn);this.renderer.toneMappingExposure=lerp(1.02,.94,this.dawn);
+    this.key.intensity=lerp(.45,.9,this.dawn);this.fill.intensity=lerp(.3,.5,this.dawn);this.ambient.intensity=lerp(.3,.6,this.dawn);
+    this.heart.intensity=lerp(1.4,.65,this.dawn)*(.4+.6*this.reveals[2]);this.sparkle.intensity=lerp(4.2,3.5,this.dawn);
+    this.keyArea.intensity=lerp(2.6,3.9,this.dawn);this.rimArea.intensity=lerp(2.9,2.4,this.dawn);this.backArea.intensity=lerp(1.9,2.2,this.dawn);
+    this.bloom.strength=lerp(.14,.09,this.dawn);this.renderer.toneMappingExposure=lerp(.98,.9,this.dawn);
     this.renderer.info.reset();this.composer.render();
     // Resolution adapts only after sustained slow windows; morphology, solid
     // band dimensions, MSAA and SMAA remain intact.
-    if(this.clock>4&&rawDt<.4){
-      this.sampleTime+=rawDt;this.sampleFrames++;
+    if(this.clock>4){
+      this.sampleTime+=Math.min(rawDt,.5);this.sampleFrames++;
+      this.frameMs=this.sampleTime/this.sampleFrames*1000;
       if(this.sampleFrames>=120){
         this.slowWindows=this.sampleTime/this.sampleFrames>.045?this.slowWindows+1:0;
         if(this.slowWindows>=3&&this.dpr>1.25){
@@ -283,6 +289,7 @@ export class FlowerScene {
         this.sampleFrames=0;this.sampleTime=0;
       }
     }
+    this.canvas.dataset.frameMs=this.frameMs.toFixed(1);
     this.canvas.dataset.closedBud=String(this.reveals[0]<.005);
     const details=this.flower.diagnostics();
     this.canvas.dataset.petalCount=String(details.petals);this.canvas.dataset.layerCount=String(details.layers);this.canvas.dataset.ringCount=String(details.rings);
@@ -292,7 +299,7 @@ export class FlowerScene {
   };
 
   diagnostics():Record<string,unknown> {
-    return {webgl:this.renderer.capabilities.isWebGL2,dpr:this.dpr,growth:this.growth,targetGrowth:this.growthTarget,profile:{...this.profile},
+    return {webgl:this.renderer.capabilities.isWebGL2,dpr:this.dpr,frameMs:this.frameMs,growth:this.growth,targetGrowth:this.growthTarget,profile:{...this.profile},
       stage:BLOOM_STAGE_NAMES[this.unlockedStage],reveals:[...this.reveals],...this.flower.diagnostics(),
       rotation:{yaw:this.rotation.state.yaw,pitch:this.rotation.state.pitch},
       antialias:{samples:this.composer.renderTarget1.samples,smaa:this.smaa.enabled,supersampling:true},

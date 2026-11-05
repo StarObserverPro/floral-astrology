@@ -22,6 +22,12 @@ test('real answer extremes reach sparse, dense, elongated and unequal four-petal
   assert.ok(peony.ruffle>peach.ruffle*8);
   assert.ok(veronica.asymmetry>.3);
   assert.notDeepEqual(petalOutline(peach,.8,1),petalOutline(magnolia,.8,1));
+  // A 2:1 majority must already produce a recognisable family, not only a
+  // unanimous vote on both axes. Keep the four endpoints visually far apart.
+  const mild=(e:number,n:number)=>morphologyFromProfile({outward:e,dream:n,softness:.5,freedom:.5},7);
+  assert.ok(totalPetalCount(mild(.375,.625))>totalPetalCount(mild(.625,.375))*9);
+  assert.ok(mild(.375,.375).length/mild(.375,.375).width>3);
+  assert.equal(totalPetalCount(mild(.625,.625)),4);
 });
 
 test('all dimensions remain finite and within capacity across every scoring combination',()=>{
@@ -38,7 +44,8 @@ test('all dimensions remain finite and within capacity across every scoring comb
 test('seeded dimensions are reproducible and affect the whole metal assembly',()=>{
   const profile=profileFromAnswers(answersFor('ESTJ')),a=morphologyFromProfile(profile,1),b=morphologyFromProfile(profile,2);
   assert.deepEqual(a,morphologyFromProfile(profile,1));
-  for(const key of ['stemCount','stemLength','stemRadius','ringCount','ringRadius','ringThickness','pendantCount','calyxCount','calyxThickness'] as const)assert.notEqual(a[key],b[key]);
+  for(const key of ['stemLength','stemRadius','ringRadius','ringThickness','calyxThickness'] as const)assert.notEqual(a[key],b[key]);
+  assert.ok(['stemCount','ringCount','pendantCount','calyxCount'].some(key=>a[key as keyof typeof a]!==b[key as keyof typeof b]));
   assert.deepEqual(ringCenter(a),[0,.16-a.stemLength,0]);
   assert.notEqual(shapeSeedFromAnswers(answersFor('ESTJ')),shapeSeedFromAnswers(answersFor('ISTJ')));
 });

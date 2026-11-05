@@ -69,7 +69,7 @@ export class FlowerFallback {
   }
   private tick=(now:number):void=>{
     if(this.disposed||document.hidden)return;
-    const dt=this.last?Math.min((now-this.last)/1000,.07):1/60;this.last=now;
+    const dt=this.last?Math.min((now-this.last)/1000,.25):1/60;this.last=now;
     if(!this.reduced)this.time+=dt;
     for(const key of Object.keys(this.current) as (keyof FlowerProfile)[])this.current[key]=approach(this.current[key],this.target[key],dt,this.reduced ? .15 : 2.2);
     for(const key of MORPHOLOGY_KEYS)this.genes[key]=approach(this.genes[key],this.targetGenes[key],dt,this.reduced ? .15 : 1.65);

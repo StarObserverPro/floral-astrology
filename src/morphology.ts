@@ -40,7 +40,8 @@ const ANCHORS = [
 export const FAMILY_NAMES = ['peach', 'peony', 'magnolia', 'veronica'] as const;
 
 export function familyWeights(profile: FlowerProfile): number[] {
-  const e = clamp01((profile.outward-.125)/.75), n = clamp01((profile.dream-.125)/.75);
+  const accent = (value:number) => { const t=clamp01((value-.35)/.30);return t*t*(3-2*t); };
+  const e=accent(profile.outward),n=accent(profile.dream);
   return [e*(1-n), (1-e)*n, (1-e)*(1-n), e*n];
 }
 export function dominantFamily(profile: FlowerProfile): string {
@@ -76,6 +77,7 @@ export function morphologyFromProfile(profile: FlowerProfile, seed = 20261105): 
   result.twist = .025+f*.19;
   result.asymmetry = weights[3]*.36+weights[1]*f*.12;
   result.stamenCount = Math.max(2, weights[0]*24+weights[1]*32+weights[2]*10+weights[3]*3+(random()-.5)*2);
+  for(const key of ['layers','petals','budPetals','calyxCount','stemCount','ringCount','pendantCount','stamenCount','shardCount'] as const) result[key]=Math.round(result[key]);
   return result;
 }
 

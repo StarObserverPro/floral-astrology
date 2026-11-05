@@ -71,13 +71,13 @@ function petalUniforms(): PetalUniforms {
 }
 function crystalMaterial(): THREE.MeshPhysicalMaterial {
   return new THREE.MeshPhysicalMaterial({
-    color:'#ffffff',metalness:0,roughness:.105,transmission:.96,thickness:.45,ior:1.65,
-    dispersion:.24,clearcoat:1,clearcoatRoughness:.10,attenuationColor:'#ddd0f2',attenuationDistance:3.2,
+    color:'#ffffff',metalness:0,roughness:.08,transmission:.96,thickness:.45,ior:1.65,
+    dispersion:.24,clearcoat:.45,clearcoatRoughness:.085,attenuationColor:'#d1bce9',attenuationDistance:1.7,
     envMapIntensity:1.45,side:THREE.DoubleSide,
   });
 }
 function petalMaterial(uniforms: PetalUniforms, metal=false): THREE.MeshPhysicalMaterial {
-  const material=metal ? new THREE.MeshPhysicalMaterial({color:'#c3a473',metalness:.94,roughness:.27,clearcoat:.6,side:THREE.DoubleSide}) : crystalMaterial();
+  const material=metal ? new THREE.MeshPhysicalMaterial({color:'#b69460',metalness:.94,roughness:.32,clearcoat:.35,envMapIntensity:.8,side:THREE.DoubleSide}) : crystalMaterial();
   material.onBeforeCompile=shader=>{
     Object.assign(shader.uniforms,uniforms);
     shader.vertexShader=petalGLSL+shader.vertexShader;
@@ -96,7 +96,7 @@ function petalMaterial(uniforms: PetalUniforms, metal=false): THREE.MeshPhysical
       shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',/* glsl */`
         #include <color_fragment>
         float blend=smoothstep(.08,.94,vPetal.x)*(.25+.65*uDream);
-        diffuseColor.rgb*=mix(mix(uColorA,uColorB,blend),vec3(1.0),.16);
+        diffuseColor.rgb*=mix(mix(uColorA,uColorB,blend),vec3(1.0),.08);
       `);
     }
   };
@@ -131,6 +131,8 @@ export class FlowerModel {
   private genes=morphologyFromProfile({outward:.5,dream:.5,softness:.5,freedom:.5});
   private target={...this.genes};
   private profile:FlowerProfile={outward:.5,dream:.5,softness:.5,freedom:.5};
+  private populations=Array.from({length:MAX_LAYERS},(_,i)=>Math.round(layerPetalCount(this.genes,i)));
+  private targetPopulations=[...this.populations];
 
   constructor() {
     const lamina=laminaGeometry(),rim=laminaGeometry(true);
@@ -141,7 +143,7 @@ export class FlowerModel {
     for(let i=0;i<MAX_LAYERS;i++) this.layers.push(layer(MAX_PETALS_PER_LAYER));
     this.bud=layer(10);
     this.calyx=layer(12,true);
-    const gold=new THREE.MeshPhysicalMaterial({color:'#c3a473',metalness:.94,roughness:.26,clearcoat:.65});
+    const gold=new THREE.MeshPhysicalMaterial({color:'#b69460',metalness:.94,roughness:.32,clearcoat:.35,envMapIntensity:.8});
     const stemMaterial=gold.clone();
     stemMaterial.onBeforeCompile=shader=>{
       Object.assign(shader.uniforms,this.stemUniforms);
@@ -188,6 +190,7 @@ export class FlowerModel {
 
   setProfile(profile:FlowerProfile,seed:number):void {
     this.profile={...profile};this.target=morphologyFromProfile(profile,seed);
+    this.targetPopulations=this.targetPopulations.map((_,i)=>Math.round(layerPetalCount(this.target,i)));
   }
 
   private setShape(layer:PetalLayer,m:Morphology,a:THREE.Color,b:THREE.Color):void {
@@ -219,8 +222,9 @@ export class FlowerModel {
     for(const key of MORPHOLOGY_KEYS) m[key]=approach(m[key],this.target[key],dt,reduced ? .15 : 1.65);
     for(let i=0;i<this.layers.length;i++) {
       const layer=this.layers[i];this.setShape(layer,m,a,b);
+      this.populations[i]=approach(this.populations[i],this.targetPopulations[i],dt,reduced ? .15 : 1.65);
       const reveal=layerReveal(i,m.layers,reveals),lengthScale=Math.max(.23,1-m.layerShrink*i);
-      this.fan(layer,layerPetalCount(m,i),reveal*lengthScale,
+      this.fan(layer,this.populations[i],reveal*lengthScale,
         lerp(-1.5,m.opening-i*.047,reveal),m.baseRadius,.22+i*m.layerRise*.35,i*2.399963,m.asymmetry,time);
     }
     this.setShape(this.bud,m,a,b);
