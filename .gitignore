@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.sites-runtime/
+.sites-checkout/
+.preview/
+.cache/
+*.tar.gz
+*.log
+evidence/
