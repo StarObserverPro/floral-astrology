@@ -538,7 +538,7 @@ export class FlowerScene {
     const portrait = width/height < .85;
     this.camera.fov = portrait ? 43 : 38;
     this.camera.position.set(0, portrait ? 5.5 : 4.8, portrait ? 12.0 : 10.5);
-    this.camera.lookAt(0, portrait ? 1.1 : .85, 0);
+    this.camera.lookAt(0, portrait ? 1.1 : 1.2, 0);
     this.camera.updateProjectionMatrix();
     this.atmosphere.uniforms.uAspect.value = width/height;
     this.motes.material.uniforms.uDpr.value = this.dpr;
