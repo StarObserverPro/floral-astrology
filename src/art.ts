@@ -22,7 +22,7 @@ export function botanicalPath(c:BotanicalCurve):string {
  * parameter endpoints retain its intentional cusp without a connecting line. */
 export function ornamentPoint(angle:number,c:OrnamentCurve):CurvePoint {
   if(c.kind==='lissajous'){
-    const a=c.frequencyX??3,b=c.frequencyY??2,p=c.phase??Math.PI/2;
+    const a=c.frequencyX??3,b=c.frequencyY??2,p=c.phase??(a%2?Math.PI/2:Math.PI/3);
     return {x:Math.sin(a*angle+p),y:Math.sin(b*angle),dx:a*Math.cos(a*angle+p),dy:b*Math.cos(b*angle)};
   }
   const u=angle/(Math.PI*2),theta=Math.PI/2*u*u*(3-2*u),speed=1.5*u*(1-u);
@@ -46,7 +46,7 @@ export function ornamentPath(c:OrnamentCurve,cx=50,cy=28,rx=39,ry=20):string {
 }
 
 export function answerArt(index:number,question=0):string {
-  const variants:OrnamentCurve[]=[{kind:'descartes'},{kind:'lissajous',frequencyX:3,frequencyY:2},{kind:'lissajous',frequencyX:2,frequencyY:3,phase:Math.PI/3},{kind:'lissajous',frequencyX:4,frequencyY:3}];
+  const variants:OrnamentCurve[]=[{kind:'descartes'},{kind:'lissajous',frequencyX:3,frequencyY:2},{kind:'lissajous',frequencyX:2,frequencyY:3,phase:Math.PI/3},{kind:'lissajous',frequencyX:4,frequencyY:3,phase:Math.PI/3}];
   const curve=variants[(question+index)%variants.length],d=ornamentPath(curve);
   return `<svg class="answer-art" data-curve="${curve.kind}" viewBox="0 0 100 56" fill="none" aria-hidden="true"><path class="art-core" fill-rule="evenodd" d="${d}"/></svg>`;
 }

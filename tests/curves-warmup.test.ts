@@ -40,7 +40,7 @@ test('all metal variants are ready without replacing model resources',()=>{
   geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());base.dispose();
 });
 test('rational leaves and Lissajous ornaments remain a single closed fitted stroke',()=>{
-  for(const curve of [{kind:'descartes' as const},{kind:'lissajous' as const,frequencyX:3,frequencyY:2},{kind:'lissajous' as const,frequencyX:4,frequencyY:3,phase:Math.PI/3}]){
+  for(const curve of [{kind:'descartes' as const},{kind:'lissajous' as const,frequencyX:3,frequencyY:2},{kind:'lissajous' as const,frequencyX:4,frequencyY:3}]){
     const a=ornamentPoint(0,curve),b=ornamentPoint(Math.PI*2,curve);
     for(const key of ['x','y','dx','dy'] as const)assert.ok(Math.abs(a[key]-b[key])<1e-9);
     for(let i=0;i<=128;i++){
@@ -51,6 +51,10 @@ test('rational leaves and Lissajous ornaments remain a single closed fitted stro
       }
     }
     const path=ornamentPath(curve);assert.equal((path.match(/M/g)??[]).length,1);assert.ok(path.endsWith('Z'));assert.ok(!/NaN|Infinity/.test(path));
+    if(curve.kind==='lissajous'){
+      const unique=new Set(Array.from({length:128},(_,i)=>{const p=ornamentPoint(i/128*Math.PI*2,curve);return `${p.x.toFixed(6)},${p.y.toFixed(6)}`;}));
+      assert.ok(unique.size>100,'ornament must not collapse to a twice-retraced open arc');
+    }
   }
   assert.notEqual(answerArt(0,0),answerArt(0,1));
 });
