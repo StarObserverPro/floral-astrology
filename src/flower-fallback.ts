@@ -100,10 +100,12 @@ export class FlowerFallback {
     c.strokeStyle=metal;c.lineWidth=Math.max(1.5,m.stemRadius*unit*.7);
     const bottom=unit*(m.stemLength*.45+.8);
     for(let i=0;i<Math.round(m.stemCount);i++) {
+      c.strokeStyle=i%2?palette.metalB:metal;
       const offset=Math.sin(i*2.4)*m.stemBend*unit;
       c.beginPath();c.moveTo(0,0);c.bezierCurveTo(offset,bottom*.35,-offset,bottom*.7,0,bottom);c.stroke();
     }
     for(let i=0;i<Math.round(m.ringCount);i++) {
+      c.strokeStyle=i%2?palette.metalC:palette.metalB;
       const radius=unit*m.ringRadius*(.28+.72*i/Math.max(1,Math.round(m.ringCount)-1))*.65;
       c.save();c.translate(0,bottom);c.rotate(this.time*m.ringSpeed*(i%2?1:-1)+i*2.4);
       c.beginPath();c.ellipse(0,0,radius*m.ringAspect,radius,0,0,Math.PI*2);
@@ -134,7 +136,7 @@ export class FlowerFallback {
       c.restore();
     }
     if(this.reveals[2]>.002) {
-      c.fillStyle=metal;
+      c.fillStyle=palette.metalC;
       for(let i=0;i<Math.round(m.stamenCount);i++) {
         const angle=i/m.stamenCount*Math.PI*2,r=m.stamenSpread*unit*this.reveals[2];
         c.beginPath();c.arc(Math.cos(angle)*r,Math.sin(angle)*r,m.antherSize*unit,0,Math.PI*2);c.fill();

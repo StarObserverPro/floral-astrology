@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { petalMaturity } from './bloom.ts';
 import { ringPose } from './lighting.ts';
 import { RingSurfaceModel } from './ring-surfaces.ts';
+import { applyMetalFinish,metalUniforms } from './metal.ts';
+import { petalGLSL } from './petal-surface.ts';
 import { approach, clamp01, lerp } from './math.ts';
 import { MAX_LAYERS, MAX_PETALS_PER_LAYER, MORPHOLOGY_KEYS, dominantFamily, layerPetalCount, layerReveal, morphologyFromProfile, ringCenter, totalPetalCount } from './morphology.ts';
 import type { Morphology } from './morphology.ts';
@@ -11,33 +13,15 @@ type Scalar = { value: number };
 type PetalUniforms = {
   uLength: Scalar; uWidth: Scalar; uRoundness: Scalar; uTaper: Scalar; uCup: Scalar;
   uRuffle: Scalar; uNotch: Scalar; uThickness: Scalar; uTwist: Scalar; uEdge: Scalar;
+  uRuffleFrequency:Scalar;uRufflePhase:Scalar;uRuffleSkew:Scalar;uRuffleEdge:Scalar;
+  uPleatAmplitude:Scalar;uPleatFrequency:Scalar;uPleatDirection:Scalar;uPleatSharpness:Scalar;uEdgeCurl:Scalar;
   uDream: Scalar; uColorA: { value: THREE.Color }; uColorB: { value: THREE.Color };
 };
 type PetalLayer = { glass: THREE.InstancedMesh; edge: THREE.InstancedMesh; uniforms: PetalUniforms };
 
-const petalGLSL = /* glsl */`
-uniform float uLength, uWidth, uRoundness, uTaper, uCup, uRuffle, uNotch, uThickness, uTwist, uEdge;
-varying vec2 vPetal;
-vec3 petalPoint(vec3 p) {
-  float t = clamp(p.x, .0001, .9999);
-  float s = p.y;
-  // The narrow second strip is a solid metal rim, not a screen-space line.
-  if (abs(s) > 1.5) s = sign(s) * (1.0 - uEdge * (abs(s)-2.0));
-  float wave = max(.00001, sin(pow(t,uTaper)*3.14159265));
-  float width = pow(wave,uRoundness);
-  float x = s * width * uWidth;
-  float ruffle = sin(t*28.0 + s*4.0) * pow(abs(s),4.0) * wave * uRuffle;
-  float y = (t*t*uCup + s*s*wave*uCup*.65 + ruffle) * uLength;
-  y += sin(t*3.14159265) * s * uTwist * .24;
-  y += p.z * uThickness * .5 * (.65+.35*wave) * sqrt(1.0-s*s*.72);
-  float z = t*uLength*(1.0-uNotch*pow(t,8.0)*pow(1.0-abs(s),4.0));
-  return vec3(x,y,z);
-}
-`;
-
 function laminaGeometry(border = false): THREE.BufferGeometry {
   const vertices: number[] = [], indices: number[] = [];
-  const rows=40, columns=border ? 1 : 20, strips=border ? [-1,1] : [0], sides=border ? [1.025] : [1,-1];
+  const rows=64, columns=border ? 1 : 24, strips=border ? [-1,1] : [0], sides=border ? [1.025] : [1,-1];
   for (const strip of strips) for (const side of sides) {
     const start=vertices.length/3;
     for(let r=0;r<=rows;r++) for(let c=0;c<=columns;c++) {
@@ -69,6 +53,8 @@ function petalUniforms(): PetalUniforms {
   return {
     uLength:{value:1.5},uWidth:{value:.6},uRoundness:{value:.6},uTaper:{value:1},uCup:{value:.2},
     uRuffle:{value:0},uNotch:{value:0},uThickness:{value:.1},uTwist:{value:0},uEdge:{value:.04},
+    uRuffleFrequency:{value:4},uRufflePhase:{value:0},uRuffleSkew:{value:3},uRuffleEdge:{value:4},
+    uPleatAmplitude:{value:0},uPleatFrequency:{value:3},uPleatDirection:{value:0},uPleatSharpness:{value:1},uEdgeCurl:{value:0},
     uDream:{value:.5},uColorA:{value:new THREE.Color()},uColorB:{value:new THREE.Color()},
   };
 }
@@ -106,7 +92,7 @@ function petalMaterial(uniforms: PetalUniforms, metal=false): THREE.MeshPhysical
       `);
     }
   };
-  material.customProgramCacheKey=()=>metal?'floral-lamina-metal-v4':'floral-lamina-crystal-v4';
+  material.customProgramCacheKey=()=>metal?'floral-lamina-metal-v5':'floral-lamina-crystal-v5';
   return material;
 }
 
@@ -136,6 +122,7 @@ export class FlowerModel {
   private ringQuaternion=new THREE.Quaternion();
   private ringEuler=new THREE.Euler();
   private materials:THREE.MeshPhysicalMaterial[]=[];
+  private alloy=metalUniforms();
   private genes=morphologyFromProfile({outward:.5,dream:.5,softness:.5,freedom:.5});
   private target={...this.genes};
   private profile:FlowerProfile={outward:.5,dream:.5,softness:.5,freedom:.5};
@@ -185,6 +172,7 @@ export class FlowerModel {
     const materials=new Set<THREE.MeshPhysicalMaterial>();
     this.root.traverse(o=>{if(o instanceof THREE.Mesh){const list=Array.isArray(o.material)?o.material:[o.material];list.forEach(m=>{if(m instanceof THREE.MeshPhysicalMaterial){m.alphaHash=true;materials.add(m);}});}});
     this.materials=[...materials];
+    this.materials.filter(m=>m.metalness>.5).forEach((material,i)=>applyMetalFinish(material,this.alloy,i*.73));
   }
 
   setProfile(profile:FlowerProfile,seed:number):void {
@@ -197,6 +185,8 @@ export class FlowerModel {
     u.uLength.value=m.length;u.uWidth.value=m.width;u.uRoundness.value=m.roundness;u.uTaper.value=m.taper;
     u.uCup.value=m.cup;u.uRuffle.value=m.ruffle;u.uNotch.value=m.notch;u.uThickness.value=m.thickness;
     u.uTwist.value=m.twist;u.uEdge.value=m.edgeWidth;u.uDream.value=this.profile.dream;
+    u.uRuffleFrequency.value=m.ruffleFrequency;u.uRufflePhase.value=m.rufflePhase;u.uRuffleSkew.value=m.ruffleSkew;u.uRuffleEdge.value=m.ruffleEdge;
+    u.uPleatAmplitude.value=m.pleatAmplitude;u.uPleatFrequency.value=m.pleatFrequency;u.uPleatDirection.value=m.pleatDirection;u.uPleatSharpness.value=m.pleatSharpness;u.uEdgeCurl.value=m.edgeCurl;
     u.uColorA.value.copy(a);u.uColorB.value.copy(b);
     (layer.glass.material as THREE.MeshPhysicalMaterial).thickness=m.thickness*5;
   }
@@ -219,6 +209,7 @@ export class FlowerModel {
   update(dt:number,time:number,growth:number,reveals:readonly number[],a:THREE.Color,b:THREE.Color,reduced=false):void {
     const m=this.genes,d=this.transform,maturity=petalMaturity(growth);
     for(const key of MORPHOLOGY_KEYS) m[key]=approach(m[key],this.target[key],dt,reduced ? .15 : 1.65);
+    this.alloy.uMetalBalance.value=m.metalBalance;this.alloy.uMetalPattern.value=m.metalPattern;
     for(let i=0;i<this.layers.length;i++) {
       const layer=this.layers[i];this.setShape(layer,m,a,b);
       this.populations[i]=approach(this.populations[i],this.targetPopulations[i],dt,reduced ? .15 : 1.65);
@@ -230,11 +221,13 @@ export class FlowerModel {
     const bu=this.bud.uniforms;
     bu.uLength.value=m.budLength;bu.uWidth.value=m.budWidth;bu.uCup.value=.30/m.budLength;
     bu.uRoundness.value=.65;bu.uTaper.value=1;bu.uRuffle.value=m.ruffle*.12;bu.uNotch.value=0;bu.uTwist.value=0;
+    bu.uPleatAmplitude.value=m.pleatAmplitude*.15;bu.uEdgeCurl.value=0;
     this.fan(this.bud,m.budPetals,lerp(.92,.56*maturity,reveals[0])*(.98+.035*growth),lerp(-Math.PI/2,.12,reveals[0]),.30,.18,0,0,time);
     this.setShape(this.calyx,m,a,b);
     const cu=this.calyx.uniforms;
     cu.uLength.value=m.calyxLength;cu.uWidth.value=m.calyxWidth;cu.uThickness.value=m.calyxThickness;
     cu.uCup.value=.08+m.cup*.45;cu.uRuffle.value=m.ruffle*.3;cu.uRoundness.value=.55+m.roundness*.4;
+    cu.uPleatAmplitude.value=m.pleatAmplitude*.3;cu.uEdgeCurl.value=m.edgeCurl*.4;
     this.fan(this.calyx,m.calyxCount,(.55+.45*reveals[1])*(.55+.45*growth),-.12,.10,.13,.45,m.asymmetry*.3,time);
 
     const stemLength=m.stemLength*(.62+.38*growth);
@@ -253,8 +246,9 @@ export class FlowerModel {
     for(let i=0;i<this.rings.length;i++) {
       const ring=this.rings[i];ring.mesh.visible=i<ringCount;
       const radius=outerRadius*(ringCount===1?.7:.45+.55*i/Math.max(1,ringCount-1))*(.42+.58*growth);
-      ring.update((Math.round(m.ringSurface)+i)%4,m.ringFacets,{
+      ring.update((Math.round(m.ringSurface)+i)%5,m.ringFacets,{
         radius,tube:m.ringThickness,depth:m.ringDepth,width:Math.min(m.ringBandWidth,radius*.8),fold:m.ringFold*radius,
+        twists:Math.round(m.ringTwists)*(i%2?-1:1),sheets:Math.round(m.ringSheets),winding:m.ringKnotWinding<4?3:5,
       });
       ring.mesh.position.set(0,0,0);
       const pose=ringPose(m.ringPattern,i,time,m.ringSpeed*.45,m.ringTilt);
@@ -312,11 +306,9 @@ export class FlowerModel {
     return ()=>{states.forEach(({object,visible})=>{object.visible=visible;});this.materials.forEach((material,i)=>{material.opacity=opacities[i];});};
   }
 
-  setAppearance(alpha:number,metal:THREE.Color):void {
-    for(const material of this.materials){
-      material.opacity=alpha;
-      if(material.metalness>.5)material.color.copy(metal);
-    }
+  setAppearance(alpha:number,metal:THREE.Color,metalB=metal,metalC=metal):void {
+    this.materials.forEach(material=>{material.opacity=alpha;});
+    this.alloy.uMetalA.value.copy(metal);this.alloy.uMetalB.value.copy(metalB);this.alloy.uMetalC.value.copy(metalC);
   }
 
   diagnostics():Record<string,unknown> {

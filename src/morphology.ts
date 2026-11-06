@@ -22,8 +22,10 @@ const BASE_MORPHOLOGY_LIMITS = {
   shardCount: [3, 24], shardRadius: [1.25, 2.05], shardHeight: [.45, 1.55],
   shardSize: [.075, .17], shardAspect: [.85, 3.3], shardOrbit: [.025, .12],
 } as const;
-const RING_SURFACE_LIMITS={ringSurface:[0,3],ringFacets:[5,12],ringFold:[.16,.62],ringBandWidth:[.11,.29]} as const;
-export const MORPHOLOGY_LIMITS={...BASE_MORPHOLOGY_LIMITS,...RING_SURFACE_LIMITS};
+const RING_SURFACE_LIMITS={ringSurface:[0,4],ringFacets:[5,12],ringFold:[.16,.62],ringBandWidth:[.11,.29],ringTwists:[1,3],ringSheets:[2,3],ringKnotWinding:[3,5]} as const;
+const FOLD_LIMITS={ruffleFrequency:[2.5,8],rufflePhase:[0,Math.PI*2],ruffleSkew:[.6,4.8],ruffleEdge:[1.6,6],pleatAmplitude:[.003,.055],pleatFrequency:[1.5,5],pleatDirection:[-.8,.8],pleatSharpness:[1,2.6],edgeCurl:[-.12,.20]} as const;
+const METAL_LIMITS={metalHue:[0,360],metalSpread:[28,160],metalChroma:[.12,.48],metalBalance:[.35,.85],metalPattern:[0,2]} as const;
+export const MORPHOLOGY_LIMITS={...BASE_MORPHOLOGY_LIMITS,...RING_SURFACE_LIMITS,...FOLD_LIMITS,...METAL_LIMITS};
 export type Morphology = { -readonly [K in keyof typeof MORPHOLOGY_LIMITS]: number };
 export const MORPHOLOGY_KEYS = Object.keys(MORPHOLOGY_LIMITS) as (keyof Morphology)[];
 export const MAX_LAYERS = 8;
@@ -86,6 +88,27 @@ export function morphologyFromProfile(profile: FlowerProfile, seed = 20261105): 
     const [min,max]=RING_SURFACE_LIMITS[key];result[key]=lerp(min,max,surfaceRandom());
   }
   result.ringSurface=Math.round(result.ringSurface);result.ringFacets=Math.round(result.ringFacets);
+  result.ringTwists=Math.round(result.ringTwists);result.ringSheets=Math.round(result.ringSheets);
+  result.ringKnotWinding=result.ringKnotWinding<4?3:5;
+  const folds=seededRandom(seed^0x2d738f29);
+  for(const key of Object.keys(FOLD_LIMITS) as (keyof typeof FOLD_LIMITS)[]){
+    const [min,max]=FOLD_LIMITS[key];result[key]=lerp(min,max,folds());
+  }
+  // Dense peonies fold strongly; thick magnolia cups remain comparatively calm.
+  result.pleatAmplitude*=.22+weights[1]*.78;
+  result.pleatAmplitude=Math.max(FOLD_LIMITS.pleatAmplitude[0],result.pleatAmplitude);
+  result.edgeCurl*=.3+weights[1]*.7;
+  Object.assign(result,metalColorGenes(profile,seed));
+  return result;
+}
+
+export function metalColorGenes(profile:FlowerProfile,seed:number):Pick<Morphology,keyof typeof METAL_LIMITS> {
+  const r=seededRandom(seed^0x6fc93a21),result={} as Pick<Morphology,keyof typeof METAL_LIMITS>;
+  for(const key of Object.keys(METAL_LIMITS) as (keyof typeof METAL_LIMITS)[]){
+    const [min,max]=METAL_LIMITS[key];result[key]=lerp(min,max,r());
+  }
+  result.metalHue=(result.metalHue+profile.dream*34+profile.softness*22)%360;
+  result.metalPattern=Math.round(result.metalPattern);
   return result;
 }
 

@@ -112,7 +112,7 @@ function renderQuestion(focus = false): void {
       button.type = 'button';
       button.className = 'answer';
       button.dataset.answer = String(index);
-      button.innerHTML = answerArt(index)+'<span class="answer-label"></span>';
+      button.innerHTML = answerArt(index,questionIndex)+'<span class="answer-label"></span>';
       button.querySelector('.answer-label')!.textContent = option.text;
       button.addEventListener('click', () => choose(index, button));
       return button;

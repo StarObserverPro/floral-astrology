@@ -101,7 +101,11 @@ export class FlowerScene {
   private colorA=new THREE.Color(generateColors(this.profile,this.seed).a);
   private colorB=new THREE.Color(generateColors(this.profile,this.seed).b);
   private colorMetal=new THREE.Color(generateColors(this.profile,this.seed).metal);
+  private colorMetalB=new THREE.Color(generateColors(this.profile,this.seed).metalB);
+  private colorMetalC=new THREE.Color(generateColors(this.profile,this.seed).metalC);
   private nextMetal=this.colorMetal.clone();
+  private nextMetalB=this.colorMetalB.clone();
+  private nextMetalC=this.colorMetalC.clone();
   private appearanceAge=0;
   private nextA=this.colorA.clone();
   private nextB=this.colorB.clone();
@@ -189,7 +193,7 @@ export class FlowerScene {
             this.composer.setPixelRatio(1);this.composer.setSize(width,height);this.diffusion.setDpr(1);this.atmosphere.setSize(width,height);
             this.renderFrame();this.renderFrame();
             restoreLayout();this.flower.update(0,0,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
-            this.flower.setAppearance(0,this.colorMetal);this.canvas.dataset.warmup='uploading';
+            this.flower.setAppearance(0,this.colorMetal,this.colorMetalB,this.colorMetalC);this.canvas.dataset.warmup='uploading';
             this.renderFrame();
           },
           fence:()=>this.disposed?Promise.resolve():waitForGpu(this.renderer.getContext() as WebGL2RenderingContext),
@@ -198,7 +202,7 @@ export class FlowerScene {
         if(this.disposed)return;
         this.appearanceAge=0;this.last=0;this.ready=true;
         this.flower.update(0,0,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
-        this.flower.setAppearance(0,this.colorMetal);
+        this.flower.setAppearance(0,this.colorMetal,this.colorMetalB,this.colorMetalC);
         this.renderFrame();this.canvas.dataset.warmup='ready';this.canvas.dataset.warmupMs=(performance.now()-started).toFixed(0);
         document.documentElement.dataset.rendered='true';
         this.frame=requestAnimationFrame(this.tick);
@@ -222,6 +226,7 @@ export class FlowerScene {
   private retargetColors():void {
     const colors=generateColors(this.target,this.seed,this.palette,this.colorAlgorithm);
     this.nextA.set(colors.a);this.nextB.set(colors.b);this.nextMetal.set(colors.metal);
+    this.nextMetalB.set(colors.metalB);this.nextMetalC.set(colors.metalC);
   }
   setPalette(index:number):void {if(!PALETTES[index])return;this.palette=index;this.retargetColors();}
   setColorAlgorithm(index:number):void {if(!COLOR_ALGORITHMS[index])return;this.colorAlgorithm=index;this.retargetColors();}
@@ -285,8 +290,9 @@ export class FlowerScene {
     for(let i=0;i<4;i++)this.reveals[i]=approach(this.reveals[i],this.revealTargets[i],dt,this.reduced ? .15 : 1.3);
     this.dawn=approach(this.dawn,this.dawnTarget,dt,.65);
     this.colorA.lerp(this.nextA,1-Math.exp(-dt*2.4));this.colorB.lerp(this.nextB,1-Math.exp(-dt*2.4));this.colorMetal.lerp(this.nextMetal,1-Math.exp(-dt*2.4));
+    this.colorMetalB.lerp(this.nextMetalB,1-Math.exp(-dt*2.4));this.colorMetalC.lerp(this.nextMetalC,1-Math.exp(-dt*2.4));
     this.flower.update(dt,time,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
-    this.flower.setAppearance(flowerAppearance(this.appearanceAge,this.reduced),this.colorMetal);
+    this.flower.setAppearance(flowerAppearance(this.appearanceAge,this.reduced),this.colorMetal,this.colorMetalB,this.colorMetalC);
     this.rotation.update(dt,this.reduced);const view=this.rotation.state;
     this.flower.root.rotation.set(view.pitch,view.yaw,view.roll,'ZXY');this.flower.root.position.y=Math.sin(time*.65)*.018;
     const lights=lightOrbits(time);
@@ -316,6 +322,7 @@ export class FlowerScene {
     this.canvas.dataset.petalMaturity=petalMaturity(this.growth).toFixed(3);
     this.canvas.dataset.colorAlgorithm=COLOR_ALGORITHMS[this.colorAlgorithm].id;
     this.canvas.dataset.generatedColors=[this.colorA.getHexString(),this.colorB.getHexString()].join(',');
+    this.canvas.dataset.generatedMetals=[this.colorMetal,this.colorMetalB,this.colorMetalC].map(c=>c.getHexString()).join(',');
     this.canvas.dataset.lightPosition=this.sparkle.position.toArray().map(v=>v.toFixed(2)).join(',');
     this.canvas.dataset.frameMs=this.frameMs.toFixed(1);
     this.canvas.dataset.closedBud=String(this.reveals[0]<.005);
