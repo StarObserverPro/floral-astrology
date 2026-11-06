@@ -35,6 +35,8 @@ export class KnotGeometry extends THREE.BufferGeometry {
   }
   updateDimensions(p:RingDimensions):void {
     const positions=this.getAttribute('position'),normals=this.getAttribute('normal'),rows=192,cols=12;
+    // Preserve an embedded tube while a young flower's ring is still small.
+    const tube=Math.min(p.tube,p.radius*((p.winding??3)===5?.075:.12)/Math.max(1,p.depth));
     const center=new THREE.Vector3(),a=new THREE.Vector3(),b=new THREE.Vector3(),tangent=new THREE.Vector3(),normal=new THREE.Vector3(),binormal=new THREE.Vector3(),v=new THREE.Vector3();
     for(let r=0;r<=rows;r++){
       const u=r/rows;knotCenterPoint(u,p,center);
@@ -43,7 +45,7 @@ export class KnotGeometry extends THREE.BufferGeometry {
       binormal.crossVectors(tangent,normal).normalize();
       for(let c=0;c<=cols;c++){
         const t=c/cols*Math.PI*2,i=r*(cols+1)+c,co=Math.cos(t),si=Math.sin(t);
-        v.copy(center).addScaledVector(normal,p.tube*co).addScaledVector(binormal,p.tube*p.depth*si);
+        v.copy(center).addScaledVector(normal,tube*co).addScaledVector(binormal,tube*p.depth*si);
         positions.setXYZ(i,v.x,v.y,v.z);
         v.copy(normal).multiplyScalar(co).addScaledVector(binormal,si/p.depth).normalize();normals.setXYZ(i,v.x,v.y,v.z);
       }
