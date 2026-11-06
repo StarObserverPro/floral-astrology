@@ -5,16 +5,16 @@ import { PhotoDialog } from './photo.ts';
 import { QUESTIONS, answerAt, flowerReading, profileFromAnswers, resultType } from './quiz.ts';
 import type { Answer } from './quiz.ts';
 import { PALETTES, COLOR_ALGORITHMS } from './color.ts';
-import { answerArt, colorArt } from './art.ts';
+import { answerArt, colorArt, buttonIcon, paletteArt } from './art.ts';
 import { shapeSeedFromAnswers } from './morphology.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
-const sun = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3.7"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
-const moon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z"/><path d="m17 3 .5 1.5L19 5l-1.5.5L17 7l-.5-1.5L15 5l1.5-.5Z"/></svg>';
-const back = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>';
-const again = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10a8 8 0 1 1 .8 6.1M4 4v6h6"/></svg>';
-const camera = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 6l1.5-3h5L16 6h5v15H3V6Z"/><circle cx="12" cy="13" r="4"/></svg>';
-const orbit = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="4.5" transform="rotate(-22 12 12)"/><path d="m15 3 4 1-1 4M8 21l-4-1 1-4"/><path d="M12 8v8"/></svg>';
+const sun = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3.7"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>');
+const moon = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 14a8.5 8.5 0 0 1-10.5-10.5A8.5 8.5 0 1 0 20.5 14Z"/><path d="m17 3 .5 1.5L19 5l-1.5.5L17 7l-.5-1.5L15 5l1.5-.5Z"/></svg>');
+const back = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>');
+const again = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 10a8 8 0 1 1 .8 6.1M4 4v6h6"/></svg>');
+const camera = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 6l1.5-3h5L16 6h5v15H3V6Z"/><circle cx="12" cy="13" r="4"/></svg>');
+const orbit = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="4.5" transform="rotate(-22 12 12)"/><path d="m15 3 4 1-1 4M8 21l-4-1 1-4"/><path d="M12 8v8"/></svg>');
 
 app.innerHTML = `
   <div id="scene" aria-busy="true"></div>
@@ -25,12 +25,13 @@ app.innerHTML = `
   <section id="question-area" aria-labelledby="question">
     <div id="question-copy" class="question-copy" aria-live="polite" aria-atomic="true">
       <h1 id="question"></h1>
+      <p id="type-plain" class="result-plain" aria-hidden="true" hidden></p>
       <p id="reading" class="reading" hidden></p>
     </div>
     <div id="choices" class="choices" role="group" aria-labelledby="question"></div>
   </section>
   <div class="palette" role="group" aria-label="水晶颜色">
-    ${PALETTES.map((palette, index) => `<button class="palette-button" data-palette="${index}" aria-label="${palette.name}" aria-pressed="${index === 0}" style="--gem-color:${palette.gem}"><span class="palette-gem" aria-hidden="true"></span></button>`).join('')}
+    ${PALETTES.map((palette, index) => `<button class="palette-button" data-palette="${index}" aria-label="${palette.name}" aria-pressed="${index === 0}" style="--gem-color:${palette.gem}">${paletteArt()}</button>`).join('')}
     <div class="color-modes" role="group" aria-label="配色方式">
       ${COLOR_ALGORITHMS.map((mode,index)=>`<button class="palette-button color-mode" data-color-mode="${index}" aria-label="${mode.name}" aria-pressed="${index===1}">${colorArt(index)}</button>`).join('')}
     </div>
@@ -62,6 +63,8 @@ const backButton = document.querySelector<HTMLButtonElement>('#back')!;
 const themeButton = document.querySelector<HTMLButtonElement>('#theme')!;
 const restartButton = document.querySelector<HTMLButtonElement>('#restart')!;
 const reading = document.querySelector<HTMLElement>('#reading')!;
+const plainType=document.querySelector<HTMLElement>('#type-plain')!;
+let bootCancelled=false;
 const progress = document.querySelector<HTMLElement>('#progress')!;
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const cameraButton = document.querySelector<HTMLButtonElement>('#camera')!;
@@ -85,7 +88,7 @@ function renderQuestion(focus = false): void {
   const complete = questionIndex >= QUESTIONS.length;
   document.documentElement.dataset.complete = String(complete);
   question.classList.toggle('result-type', complete);
-  reading.hidden = !complete;
+  reading.hidden = !complete;plainType.hidden=!complete;plainType.textContent=complete?resultType(answers):'';
   restartButton.hidden = !complete;
   backButton.hidden = questionIndex === 0;
   choices.hidden = complete;
@@ -206,22 +209,27 @@ document.documentElement.dataset.theme = theme;
 
 // The question remains usable while the GPU warms up. Font or graphics support
 // never blocks answering, and no account, API key, or stored quiz is involved.
-requestAnimationFrame(() => {
+async function startScene():Promise<void> {
+  if(bootCancelled)return;
+  let candidate:FlowerScene|undefined;
+  document.documentElement.dataset.rendered='false';
   try {
-    scene = new FlowerScene(sceneElement);
-    scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
-    sceneElement.setAttribute('aria-busy', 'false');
-  } catch (error) {
-    console.warn('WebGL is unavailable; using the canvas flower.', error);
-    sceneElement.setAttribute('aria-busy', 'false');
-    scene = new FlowerFallback(sceneElement);
-    scene.setProfile(profileFromAnswers(answers), answers.length / QUESTIONS.length, false, shapeSeedFromAnswers(answers));
-    scene.setTheme(theme, true);
+    candidate=new FlowerScene(sceneElement);scene=candidate;
+    candidate.setProfile(profileFromAnswers(answers),answers.length/QUESTIONS.length,false,shapeSeedFromAnswers(answers));
+    candidate.setTheme(theme,true);candidate.setPalette(paletteIndex);candidate.setColorAlgorithm(colorAlgorithm);
+    await Promise.all([candidate.prepare(),document.fonts.load('53px "Floral Gothic"','ESTJINFP').catch(()=>[])]);
+  } catch(error) {
+    candidate?.dispose();
+    if(bootCancelled)return;
+    console.warn('WebGL preparation is unavailable; using the canvas flower.',error);
+    scene=new FlowerFallback(sceneElement);
+    scene.setProfile(profileFromAnswers(answers),answers.length/QUESTIONS.length,false,shapeSeedFromAnswers(answers));
+    scene.setTheme(theme,true);scene.setPalette(paletteIndex);scene.setColorAlgorithm(colorAlgorithm);
   }
-  scene?.setPalette(paletteIndex);scene?.setColorAlgorithm(colorAlgorithm);
-  cameraButton.disabled = false;
-  viewButton.disabled = false;
-});
+  if(bootCancelled)return;
+  sceneElement.setAttribute('aria-busy','false');cameraButton.disabled=false;viewButton.disabled=false;
+}
+requestAnimationFrame(()=>{requestAnimationFrame(()=>{void startScene();});});
 
 sceneElement.addEventListener('flower-context-lost', () => { document.documentElement.dataset.rendered = 'false'; });
 sceneElement.addEventListener('flower-context-restored', () => { document.documentElement.dataset.rendered = 'true'; });
@@ -234,6 +242,7 @@ if (new URLSearchParams(location.search).has('qa')) {
 }
 
 if (import.meta.hot) import.meta.hot.dispose(() => {
+  bootCancelled=true;
   if (transitionTimer) clearTimeout(transitionTimer);
   photos.dispose();
   scene?.dispose();

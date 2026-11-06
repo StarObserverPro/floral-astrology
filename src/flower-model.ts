@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { petalMaturity } from './bloom.ts';
 import { ringPose } from './lighting.ts';
+import { RingSurfaceModel } from './ring-surfaces.ts';
 import { approach, clamp01, lerp } from './math.ts';
 import { MAX_LAYERS, MAX_PETALS_PER_LAYER, MORPHOLOGY_KEYS, dominantFamily, layerPetalCount, layerReveal, morphologyFromProfile, ringCenter, totalPetalCount } from './morphology.ts';
 import type { Morphology } from './morphology.ts';
@@ -123,7 +124,7 @@ export class FlowerModel {
   private calyx: PetalLayer;
   private stems: THREE.InstancedMesh;
   private stemUniforms={uStemLength:{value:1},uStemRadius:{value:.05},uStemBend:{value:.1},uStemSpread:{value:.1},uStemTwist:{value:1}};
-  private rings: {mesh:THREE.Mesh;uRadius:Scalar;uTube:Scalar;uDepth:Scalar}[]=[];
+  private rings:RingSurfaceModel[]=[];
   private ringNest=new THREE.Group();
   private pendants: THREE.InstancedMesh;
   private filaments: THREE.InstancedMesh;
@@ -169,19 +170,8 @@ export class FlowerModel {
     stemMaterial.customProgramCacheKey=()=>'floral-branch-v1';
     this.stems=instances(new THREE.CylinderGeometry(1,1,1,12,32,true),stemMaterial,4);
     this.root.add(this.stems,this.ringNest);
-    const torus=new THREE.TorusGeometry(1,1,16,160);
-    for(let i=0;i<2;i++) {
-      const material=gold.clone(),uRadius={value:.7},uTube={value:.04},uDepth={value:1};
-      material.onBeforeCompile=shader=>{
-        Object.assign(shader.uniforms,{uRadius,uTube,uDepth});
-        shader.vertexShader='uniform float uRadius,uTube,uDepth;\n'+shader.vertexShader;
-        shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',/* glsl */`
-          vec3 transformed=vec3((position.xy-normal.xy)*uRadius+normal.xy*uTube,normal.z*uTube*uDepth);
-        `);
-      };
-      material.customProgramCacheKey=()=>'floral-solid-band-v1';
-      const mesh=new THREE.Mesh(torus,material);mesh.frustumCulled=false;
-      this.ringNest.add(mesh);this.rings.push({mesh,uRadius,uTube,uDepth});
+    for(let i=0;i<2;i++){
+      const ring=new RingSurfaceModel(gold);this.ringNest.add(ring.mesh);this.rings.push(ring);
     }
     const octahedron=new THREE.OctahedronGeometry(1,0);
     this.jewel=crystalMaterial();this.jewel.flatShading=true;
@@ -262,8 +252,10 @@ export class FlowerModel {
     const ringCount=Math.round(m.ringCount),outerRadius=Math.max(m.ringRadius,.26+(ringCount-1)*m.ringThickness*2.8);
     for(let i=0;i<this.rings.length;i++) {
       const ring=this.rings[i];ring.mesh.visible=i<ringCount;
-      ring.uRadius.value=outerRadius*(.32+.68*i/Math.max(1,ringCount-1))*(.42+.58*growth);
-      ring.uTube.value=m.ringThickness;ring.uDepth.value=m.ringDepth;
+      const radius=outerRadius*(ringCount===1?.7:.45+.55*i/Math.max(1,ringCount-1))*(.42+.58*growth);
+      ring.update((Math.round(m.ringSurface)+i)%4,m.ringFacets,{
+        radius,tube:m.ringThickness,depth:m.ringDepth,width:Math.min(m.ringBandWidth,radius*.8),fold:m.ringFold*radius,
+      });
       ring.mesh.position.set(0,0,0);
       const pose=ringPose(m.ringPattern,i,time,m.ringSpeed*.45,m.ringTilt);
       this.ringEuler.set(...pose,'XYZ');this.ringQuaternion.setFromEuler(this.ringEuler);
@@ -312,6 +304,14 @@ export class FlowerModel {
     this.shards.instanceMatrix.needsUpdate=true;
   }
 
+  prepareAllVariants():()=>void {
+    const states:{object:THREE.Object3D;visible:boolean}[]=[];
+    this.root.traverse(object=>{states.push({object,visible:object.visible});object.visible=true;});
+    const opacities=this.materials.map(material=>material.opacity);
+    this.materials.forEach(material=>{material.opacity=1;});
+    return ()=>{states.forEach(({object,visible})=>{object.visible=visible;});this.materials.forEach((material,i)=>{material.opacity=opacities[i];});};
+  }
+
   setAppearance(alpha:number,metal:THREE.Color):void {
     for(const material of this.materials){
       material.opacity=alpha;
@@ -321,7 +321,7 @@ export class FlowerModel {
 
   diagnostics():Record<string,unknown> {
     return {family:dominantFamily(this.profile),petals:totalPetalCount(this.genes),layers:Math.round(this.genes.layers),
-      rings:Math.round(this.genes.ringCount),ringCentersCoincide:this.rings.every(r=>r.mesh.position.lengthSq()===0),
+      rings:Math.round(this.genes.ringCount),ringSurfaces:this.rings.filter(r=>r.mesh.visible).map(r=>r.surfaceName),ringCentersCoincide:this.rings.every(r=>r.mesh.position.lengthSq()===0),
       morphology:{...this.genes}};
   }
 }

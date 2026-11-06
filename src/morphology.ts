@@ -3,7 +3,7 @@ import type { Answer, FlowerProfile } from './quiz.ts';
 
 // Every flower component consumes this bounded, continuous genome. The four
 // silhouettes are anchors in one surface, not four interchangeable model files.
-export const MORPHOLOGY_LIMITS = {
+const BASE_MORPHOLOGY_LIMITS = {
   layers: [1, 7.5], petals: [4, 16], length: [1.15, 2.2], width: [.38, 1.16],
   roundness: [.25, 1.25], taper: [.6, 1.45], cup: [.015, .5], ruffle: [0, .17],
   notch: [0, .09], opening: [-.4, .18], thickness: [.035, .19],
@@ -22,6 +22,8 @@ export const MORPHOLOGY_LIMITS = {
   shardCount: [3, 24], shardRadius: [1.25, 2.05], shardHeight: [.45, 1.55],
   shardSize: [.075, .17], shardAspect: [.85, 3.3], shardOrbit: [.025, .12],
 } as const;
+const RING_SURFACE_LIMITS={ringSurface:[0,3],ringFacets:[5,12],ringFold:[.16,.62],ringBandWidth:[.11,.29]} as const;
+export const MORPHOLOGY_LIMITS={...BASE_MORPHOLOGY_LIMITS,...RING_SURFACE_LIMITS};
 export type Morphology = { -readonly [K in keyof typeof MORPHOLOGY_LIMITS]: number };
 export const MORPHOLOGY_KEYS = Object.keys(MORPHOLOGY_LIMITS) as (keyof Morphology)[];
 export const MAX_LAYERS = 8;
@@ -62,7 +64,7 @@ export function morphologyFromProfile(profile: FlowerProfile, seed = 20261105): 
   const e=profile.outward, n=profile.dream, s=profile.softness, f=profile.freedom;
   // Independent streams keep ornamental dimensions free to vary even where
   // there is no claim of a psychological meaning.
-  for (const key of MORPHOLOGY_KEYS) {
+  for (const key of Object.keys(BASE_MORPHOLOGY_LIMITS) as (keyof typeof BASE_MORPHOLOGY_LIMITS)[]) {
     const [min,max] = MORPHOLOGY_LIMITS[key];
     result[key] = lerp(min,max,clamp01(random()*.62+e*.10+n*.08+s*.09+f*.11));
   }
@@ -79,6 +81,11 @@ export function morphologyFromProfile(profile: FlowerProfile, seed = 20261105): 
   result.asymmetry = weights[3]*.36+weights[1]*f*.12;
   result.stamenCount = Math.max(2, weights[0]*24+weights[1]*32+weights[2]*10+weights[3]*3+(random()-.5)*2);
   for(const key of ['layers','petals','budPetals','calyxCount','stemCount','ringCount','ringPattern','pendantCount','stamenCount','shardCount'] as const) result[key]=Math.round(result[key]);
+  const surfaceRandom=seededRandom(seed^0x517cc1b7);
+  for(const key of Object.keys(RING_SURFACE_LIMITS) as (keyof typeof RING_SURFACE_LIMITS)[]){
+    const [min,max]=RING_SURFACE_LIMITS[key];result[key]=lerp(min,max,surfaceRandom());
+  }
+  result.ringSurface=Math.round(result.ringSurface);result.ringFacets=Math.round(result.ringFacets);
   return result;
 }
 

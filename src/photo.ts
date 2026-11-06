@@ -1,3 +1,4 @@
+import { buttonIcon } from './art.ts';
 export interface FlowerPhotoSource {
   snapshot(width: number, height: number): HTMLCanvasElement;
 }
@@ -26,16 +27,18 @@ export async function photograph(source: FlowerPhotoSource, type: string | undef
     const total = widths.reduce((a,b) => a+b, 0) + 3*12;
     let x = (canvas.width-total)/2;
     [...type].forEach((letter,i) => { c.fillText(letter,x+widths[i]/2,205); x += widths[i]+12; });
+    c.font='36px system-ui, sans-serif';c.globalAlpha=.78;
+    c.fillText(type,canvas.width/2,260);
     c.restore();
   }
   return new File([await pngBlob(canvas)], photoFilename(type), { type: 'image/png' });
 }
 
-const closeIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg>';
-const saveIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>';
-const shareIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 10H4v11h16V10h-3"/></svg>';
-const copyIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg>';
-const checkIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
+const closeIcon = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg>');
+const saveIcon = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>');
+const shareIcon = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 10H4v11h16V10h-3"/></svg>');
+const copyIcon = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></svg>');
+const checkIcon = buttonIcon('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>');
 
 export class PhotoDialog {
   private dialog: HTMLDialogElement;

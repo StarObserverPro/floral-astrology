@@ -16,6 +16,7 @@ import { PALETTES, COLOR_ALGORITHMS, generateColors } from './color.ts';
 import { lightOrbits } from './lighting.ts';
 import { AtmosphereField } from './atmosphere.ts';
 import { DiffusionPass } from './diffusion.ts';
+import { prepareGpu, waitForGpu } from './warmup.ts';
 import { dominantFamily } from './morphology.ts';
 import { renderScale, supportedSamples } from './render-quality.ts';
 
@@ -107,6 +108,8 @@ export class FlowerScene {
   private clock=0;
   private last=0;
   private disposed=false;
+  private ready=false;
+  private preparation:Promise<void>|undefined;
   private frame=0;
   private sampleFrames=0;
   private sampleTime=0;
@@ -160,7 +163,32 @@ export class FlowerScene {
     this.canvas.addEventListener('webglcontextlost',this.onContextLost);
     this.canvas.addEventListener('webglcontextrestored',this.onContextRestored);
     this.resize();this.renderer.info.autoReset=false;
-    this.frame=requestAnimationFrame(this.tick);
+    this.canvas.dataset.warmup='pending';
+  }
+
+  prepare():Promise<void> {
+    if(this.preparation)return this.preparation;
+    this.preparation=(async()=>{
+      const started=performance.now();
+      const restore=this.flower.prepareAllVariants(),output=this.composer.renderToScreen;
+      this.composer.renderToScreen=false;this.canvas.dataset.warmup='compiling';
+      try {
+        await prepareGpu({
+          compile:async()=>{await this.renderer.compileAsync(this.scene,this.camera);},
+          draw:()=>{if(this.disposed)return;this.canvas.dataset.warmup='drawing';this.renderFrame();this.renderFrame();},
+          fence:()=>this.disposed?Promise.resolve():waitForGpu(this.renderer.getContext() as WebGL2RenderingContext),
+          restore:()=>{restore();this.composer.renderToScreen=output;},
+        });
+        if(this.disposed)return;
+        this.appearanceAge=0;this.last=0;this.ready=true;
+        this.flower.update(0,0,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
+        this.flower.setAppearance(0,this.colorMetal);
+        this.renderFrame();this.canvas.dataset.warmup='ready';this.canvas.dataset.warmupMs=(performance.now()-started).toFixed(0);
+        document.documentElement.dataset.rendered='true';
+        this.frame=requestAnimationFrame(this.tick);
+      } catch(error){this.canvas.dataset.warmup='failed';throw error;}
+    })();
+    return this.preparation;
   }
 
   setProfile(profile:FlowerProfile,progress:number,reset=false,seed=20261105):void {
@@ -184,6 +212,7 @@ export class FlowerScene {
   resetView():void {this.rotation.reset();}
 
   snapshot(width:number,height:number):HTMLCanvasElement {
+    if(!this.ready)throw new Error('The flower is still preparing.');
     if(this.renderer.getContext().isContextLost())throw new Error('The graphics context is unavailable.');
     const box=this.container.getBoundingClientRect(),canvas=document.createElement('canvas');
     canvas.width=width;canvas.height=height;
@@ -205,14 +234,14 @@ export class FlowerScene {
 
   private onVisibility=():void=>{
     if(document.hidden)cancelAnimationFrame(this.frame);
-    else if(!this.disposed){this.last=0;this.frame=requestAnimationFrame(this.tick);}
+    else if(!this.disposed&&this.ready){this.last=0;this.frame=requestAnimationFrame(this.tick);}
   };
   private onContextLost=(event:Event):void=>{
-    event.preventDefault();cancelAnimationFrame(this.frame);this.container.dispatchEvent(new CustomEvent('flower-context-lost'));
+    event.preventDefault();cancelAnimationFrame(this.frame);this.ready=false;this.container.dispatchEvent(new CustomEvent('flower-context-lost'));
   };
   private onContextRestored=():void=>{
-    if(this.disposed)return;this.last=0;this.frame=requestAnimationFrame(this.tick);
-    this.container.dispatchEvent(new CustomEvent('flower-context-restored'));
+    if(this.disposed)return;this.preparation=undefined;
+    void this.prepare().then(()=>{this.container.dispatchEvent(new CustomEvent('flower-context-restored'));}).catch(error=>console.warn('Graphics preparation failed.',error));
   };
   private resize=():void=>{
     const {width,height}=this.container.getBoundingClientRect();if(!width||!height)return;
@@ -231,7 +260,7 @@ export class FlowerScene {
   }
 
   private tick=(now:number):void=>{
-    if(this.disposed||document.hidden)return;
+    if(this.disposed||!this.ready||document.hidden)return;
     const rawDt=this.last?(now-this.last)/1000:1/60,dt=Math.min(.25,rawDt);
     this.last=now;this.clock+=dt;this.appearanceAge+=dt;
     const time=this.reduced?0:this.clock;
@@ -275,6 +304,7 @@ export class FlowerScene {
     this.canvas.dataset.frameMs=this.frameMs.toFixed(1);
     this.canvas.dataset.closedBud=String(this.reveals[0]<.005);
     const details=this.flower.diagnostics();
+    this.canvas.dataset.ringSurfaces=(details.ringSurfaces as string[]).join(',');
     this.canvas.dataset.petalCount=String(details.petals);this.canvas.dataset.layerCount=String(details.layers);this.canvas.dataset.ringCount=String(details.rings);
     this.canvas.dataset.stageSettled=String(this.reveals.every((v,i)=>Math.abs(v-this.revealTargets[i])<.015));
     if(this.clock>.12){document.documentElement.dataset.rendered='true';(window as unknown as Record<string,unknown>).__VISUAL_READY__=true;}
@@ -287,7 +317,7 @@ export class FlowerScene {
   }
 
   diagnostics():Record<string,unknown> {
-    return {webgl:this.renderer.capabilities.isWebGL2,dpr:this.dpr,frameMs:this.frameMs,growth:this.growth,targetGrowth:this.growthTarget,profile:{...this.profile},
+    return {webgl:this.renderer.capabilities.isWebGL2,warmup:this.canvas.dataset.warmup,dpr:this.dpr,frameMs:this.frameMs,growth:this.growth,targetGrowth:this.growthTarget,profile:{...this.profile},
       stage:BLOOM_STAGE_NAMES[this.unlockedStage],reveals:[...this.reveals],...this.flower.diagnostics(),
       rotation:{yaw:this.rotation.state.yaw,pitch:this.rotation.state.pitch},
       antialias:{samples:this.composer.renderTarget1.samples,smaa:this.smaa.enabled,supersampling:true},

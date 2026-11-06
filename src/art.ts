@@ -1,12 +1,33 @@
-// Original flat botanical engraving. These paths are UI artwork, not painted
-// bevels or a CSS imitation of the physically rendered crystal.
+export type BotanicalCurve={cx:number;cy:number;rx:number;ry:number;lobes:number;amplitude:number;phase?:number};
+
+/** One periodic analytic curve, matching both position and tangent at its seam. */
+export function botanicalPoint(angle:number,c:BotanicalCurve):{x:number;y:number;dx:number;dy:number} {
+  const phase=c.phase??0,r=1+c.amplitude*Math.cos(c.lobes*angle+phase);
+  const dr=-c.amplitude*c.lobes*Math.sin(c.lobes*angle+phase),co=Math.cos(angle),si=Math.sin(angle);
+  return {x:c.cx+c.rx*r*co,y:c.cy+c.ry*r*si,dx:c.rx*(dr*co-r*si),dy:c.ry*(dr*si+r*co)};
+}
+export function botanicalPath(c:BotanicalCurve):string {
+  const steps=24,step=Math.PI*2/steps,f=(n:number)=>n.toFixed(3),first=botanicalPoint(0,c);
+  let path=`M${f(first.x)} ${f(first.y)}`;
+  for(let i=0;i<steps;i++){
+    const a=botanicalPoint(i*step,c),b=botanicalPoint((i+1)*step,c);
+    path+=`C${f(a.x+a.dx*step/3)} ${f(a.y+a.dy*step/3)} ${f(b.x-b.dx*step/3)} ${f(b.y-b.dy*step/3)} ${f(b.x)} ${f(b.y)}`;
+  }
+  return path+'Z';
+}
 export function answerArt(index:number):string {
-  const center=index===0
-    ? '<path d="M38 13C23 22 23 35 38 44C53 35 53 22 38 13Z"/><path d="M38 16v25m0-22c-7 6-7 12 0 18m0-18c7 6 7 12 0 18"/>'
-    : '<path d="M38 16C25 8 21 24 31 30C17 36 29 46 38 37C47 46 59 36 45 30C55 24 51 8 38 16Z"/><path d="M38 19v15m-9-12 9 12 9-12"/>';
-  return `<svg class="answer-art" viewBox="0 0 76 58" fill="none" aria-hidden="true"><g class="art-wings"><path d="M29 17C16 12 12 30 3 29C11 40 20 43 30 39M47 17C60 12 64 30 73 29C65 40 56 43 46 39"/><path d="M24 21c-10 1-6 13-15 12m43-12c10 1 6 13 15 12M17 36c5 0 6-4 6-9m36 9c-5 0-6-4-6-9"/></g><g class="art-core">${center}</g><path d="m38 3 2 4-2 4-2-4Zm0 44 2 4-2 4-2-4Z"/><circle cx="5" cy="29" r="1.2"/><circle cx="71" cy="29" r="1.2"/></svg>`;
+  const d=botanicalPath({cx:50,cy:28,rx:37,ry:17,lobes:index===0?2:3,amplitude:index===0?.16:.12,phase:Math.PI/2});
+  return `<svg class="answer-art" viewBox="0 0 100 56" fill="none" aria-hidden="true"><path class="art-core" d="${d}"/></svg>`;
+}
+export function buttonIcon(icon:string):string {
+  const d=botanicalPath({cx:32,cy:32,rx:25,ry:25,lobes:4,amplitude:.075});
+  return `<svg class="button-frame" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="${d}"/></svg>`+icon;
 }
 export function colorArt(index:number):string {
-  const petals=Array.from({length:index+1},(_,i)=>`<path transform="rotate(${i*120} 16 16)" d="M16 4C7 11 8 20 16 24C24 20 25 11 16 4Z"/>`).join('');
-  return `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true">${petals}<circle cx="16" cy="16" r="2"/></svg>`;
+  const d=botanicalPath({cx:16,cy:16,rx:9,ry:10,lobes:index+1,amplitude:.12,phase:Math.PI/2});
+  return `<svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="${d}"/></svg>`;
+}
+export function paletteArt():string {
+  const d=botanicalPath({cx:16,cy:16,rx:5.5,ry:9,lobes:1,amplitude:.16,phase:Math.PI/2});
+  return `<svg class="palette-swatch" viewBox="0 0 32 32" aria-hidden="true"><path d="${d}"/></svg>`;
 }
