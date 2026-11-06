@@ -171,13 +171,29 @@ export class FlowerScene {
     this.preparation=(async()=>{
       const started=performance.now();
       const restore=this.flower.prepareAllVariants(),output=this.composer.renderToScreen;
+      const box=this.container.getBoundingClientRect();
+      const compileTarget=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType});
+      let layoutRestored=false;
+      const restoreLayout=()=>{if(layoutRestored)return;restore();this.applySize(box.width,box.height);layoutRestored=true;};
       this.composer.renderToScreen=false;this.canvas.dataset.warmup='compiling';
       try {
         await prepareGpu({
-          compile:async()=>{await this.renderer.compileAsync(this.scene,this.camera);},
-          draw:()=>{if(this.disposed)return;this.canvas.dataset.warmup='drawing';this.renderFrame();this.renderFrame();},
+          compile:async()=>{
+            const previous=this.renderer.getRenderTarget();this.renderer.setRenderTarget(compileTarget);
+            try{await this.renderer.compileAsync(this.scene,this.camera);}finally{this.renderer.setRenderTarget(previous);}
+          },
+          draw:()=>{
+            if(this.disposed)return;this.canvas.dataset.warmup='drawing';
+            const width=Math.min(480,box.width),height=Math.min(320,box.height);
+            this.renderer.setPixelRatio(1);this.renderer.setSize(width,height,false);
+            this.composer.setPixelRatio(1);this.composer.setSize(width,height);this.diffusion.setDpr(1);this.atmosphere.setSize(width,height);
+            this.renderFrame();this.renderFrame();
+            restoreLayout();this.flower.update(0,0,this.growth,this.reveals,this.colorA,this.colorB,this.reduced);
+            this.flower.setAppearance(0,this.colorMetal);this.canvas.dataset.warmup='uploading';
+            this.renderFrame();
+          },
           fence:()=>this.disposed?Promise.resolve():waitForGpu(this.renderer.getContext() as WebGL2RenderingContext),
-          restore:()=>{restore();this.composer.renderToScreen=output;},
+          restore:()=>{restoreLayout();compileTarget.dispose();this.composer.renderToScreen=output;},
         });
         if(this.disposed)return;
         this.appearanceAge=0;this.last=0;this.ready=true;
